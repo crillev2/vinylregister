@@ -1,1 +1,132 @@
+# Recreate the file in a fresh session.
+html = r"""<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vinylregister – Android skanner (BD + ZXing + Stillbild)</title>
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <style>
+    body{margin:0;background:#0b1220;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    header{position:sticky;top:0;background:#0c1424;border-bottom:1px solid #1f2937}
+    .bar{max-width:1000px;margin:auto;padding:10px;display:flex;gap:10px;align-items:center;justify-content:space-between}
+    .btn{background:#0b1424;border:1px solid #1e293b;color:#dbeafe;border-radius:10px;padding:8px 12px;cursor:pointer}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .muted{color:#94a3b8}
+    video{width:100%;max-height:68vh;background:#000;border-radius:12px}
+    .wrap{max-width:1000px;margin:12px auto;padding:12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    select,input{background:#0b1424;color:#e5e7eb;border:1px solid #233041;border-radius:8px;padding:8px}
+    .tag{font-size:12px;border:1px solid #223049;background:#0a1524;border-radius:999px;padding:6px 8px;color:#cbd5e1}
+  </style>
+</head>
+<body>
+  <header><div class="bar">
+    <strong>Vinylregister – Android skanner</strong>
+    <div class="row">
+      <button id="btn-start" class="btn">Starta skanning</button>
+      <button id="btn-swap" class="btn" disabled>Byt kamera</button>
+      <button id="btn-torch" class="btn" disabled>Ficklampa</button>
+      <button id="btn-zoom-in" class="btn" disabled>Zoom +</button>
+      <button id="btn-zoom-out" class="btn" disabled>Zoom −</button>
+      <button id="btn-still" class="btn" disabled>Stillbild‑scan</button>
+      <span id="status" class="tag">Init</span>
+    </div>
+  </div></header>
+
+  <div class="wrap">
+    <div class="row">
+      <label>EAN</label>
+      <input id="ean" style="flex:1" />
+      <button id="btn-copy" class="btn">Kopiera</button>
+      <span id="note" class="muted"></span>
+    </div>
+    <video id="video" muted playsinline></video>
+    <canvas id="snap" style="display:none"></canvas>
+    <div class="muted" style="margin-top:6px">Tips: Ge kameratillstånd. Om selfiekamera: <b>Byt kamera</b>. Svagt ljus: <b>Ficklampa</b>. Liten kod: <b>Zoom +</b>. Håll 15–25 cm och fyll skärmens bredd. Testa även <b>Stillbild‑scan</b>.</div>
+  </div>
+
+  <script>
+    // === Helper (ES5 only) ===
+    function $(q){ return document.querySelector(q); }
+    function setText(el,t){ if(el) el.textContent=t; }
+    var statusEl=$('#status'), video=$('#video'), noteEl=$('#note'), snap=$('#snap');
+    var reader=null, curStream=null, devices=[], curIndex=0, haveTorch=false, curZoom=1, usingBD=false, detector=null, running=false, hit=false;
+
+    function log(msg){ setText(statusEl,msg); }
+    function stop(){ try{ if(reader){ if(reader.reset) reader.reset(); } }catch(e){}; reader=null; try{ if(curStream){ curStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}; curStream=null; running=false; hit=false; }
+
+    function applyZoom(delta){ try{ var track = curStream && curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('zoom' in caps)) return; curZoom=Math.max(caps.zoom.min||1, Math.min((caps.zoom.max||1),(curZoom+delta))); track.applyConstraints({advanced:[{zoom:curZoom}]}); }catch(e){} }
+    function toggleTorch(){ try{ var track=curStream && curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('torch' in caps)) return; haveTorch=!haveTorch; track.applyConstraints({advanced:[{torch:haveTorch}]}); $('#btn-torch').textContent = haveTorch?'Ficklampa: På':'Ficklampa'; }catch(e){} }
+
+    function listCams(){ return navigator.mediaDevices.enumerateDevices().then(function(all){ devices=all.filter(function(d){ return d.kind==='videoinput'; }); $('#btn-swap').disabled = devices.length<2; }); }
+
+    function startWithDevice(deviceId){
+      stop(); log('Init kamera...');
+      var constraints={ video: deviceId? {deviceId:{exact:deviceId}} : {facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30}}, audio:false };
+      return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){ video.srcObject=stream; curStream=stream; return video.play(); }).then(function(){
+        var track=curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(track && track.getCapabilities){ var caps=track.getCapabilities(); $('#btn-zoom-in').disabled=!(caps.zoom); $('#btn-zoom-out').disabled=!(caps.zoom); $('#btn-torch').disabled=!(caps.torch); } else { $('#btn-zoom-in').disabled=true; $('#btn-zoom-out').disabled=true; $('#btn-torch').disabled=true; }
+        $('#btn-still').disabled=false; return listCams();
+      }).then(function(){ log('Kamera igång'); startScannerAuto(); }).catch(function(e){ log('Kamerafel: '+(e&&e.name||e)); });
+    }
+
+    // === AUTO: använd BarcodeDetector om den finns, annars ZXing ===
+    function startScannerAuto(){ if('BarcodeDetector' in window){ usingBD=true; startBD(); } else { usingBD=false; ensureZXing(startZXing); } }
+
+    // === BarcodeDetector (inbyggd) ===
+    function startBD(){ try{ detector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); running=true; loopBD(); noteEl.textContent='(Inbyggd skanner)'; }catch(e){ usingBD=false; ensureZXing(startZXing); } }
+    function loopBD(){ if(!running||hit) return; if(video.readyState>=2){ detector.detect(video).then(function(res){ if(res&&res.length){ var code=res[0].rawValue||res[0].raw||''; if(code){ onHit(code); return; } } setTimeout(loopBD,60); }).catch(function(){ setTimeout(loopBD,120); }); } else { setTimeout(loopBD,120); } }
+
+    // === ZXing loader (multi-CDN fallback) ===
+    function loadScript(src, onload, onerror){ var s=document.createElement('script'); s.src=src; s.onload=onload; s.onerror=onerror||function(){}; document.head.appendChild(s); }
+    function ensureZXing(cb){ if(window.ZXing && window.ZXing.BrowserMultiFormatReader){ cb(); return; }
+      noteEl.textContent='Laddar ZXing…';
+      var urls=[
+        'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js',
+        'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'
+      ];
+      var i=0; (function tryNext(){ if(i>=urls.length){ noteEl.textContent='Kunde inte ladda ZXing (blockerat?). Prova inkognito eller stäng av adblock/VPN.'; return; }
+        loadScript(urls[i], function(){ noteEl.textContent=''; cb(); }, function(){ i++; tryNext(); });
+      })();
+    }
+
+    // === ZXing (utan setHints-beroende) ===
+    function startZXing(){ if(!window.ZXing||!window.ZXing.BrowserMultiFormatReader){ noteEl.textContent='ZXing saknas'; return; } log('Startar ZXing…');
+      try{
+        var ZX=window.ZXing, hints=null; try{ if(window.Map && ZX.DecodeHintType && ZX.BarcodeFormat){ hints=new Map(); hints.set(ZX.DecodeHintType.POSSIBLE_FORMATS,[ZX.BarcodeFormat.EAN_13,ZX.BarcodeFormat.EAN_8,ZX.BarcodeFormat.UPC_A,ZX.BarcodeFormat.UPC_E]); hints.set(ZX.DecodeHintType.TRY_HARDER,true); } }catch(e){}
+        try{ reader = hints ? new ZX.BrowserMultiFormatReader(hints) : new ZX.BrowserMultiFormatReader(); } catch(e){ reader = new ZX.BrowserMultiFormatReader(); }
+        if(reader.decodeFromVideoElementContinuously){ reader.decodeFromVideoElementContinuously(video, function(result, err){ if(result){ onHit(result.getText()); } }); }
+        else { (function loop(){ reader.decodeFromVideoElement(video).then(function(res){ onHit(res.getText()); }).catch(function(){ setTimeout(loop, 120); }); })(); }
+        noteEl.textContent='(ZXing)';
+      }catch(e){ noteEl.textContent='ZXing-fel: '+e; }
+    }
+
+    // === Stillbild‑scan: funkar med BD eller ZXing ===
+    function stillScan(){ if(!curStream){ return; } var w=video.videoWidth||1280, h=video.videoHeight||720; snap.width=w; snap.height=h; var ctx=snap.getContext('2d'); ctx.drawImage(video,0,0,w,h);
+      if(usingBD && detector){ detector.detect(snap).then(function(res){ if(res&&res.length){ onHit(res[0].rawValue||res[0].raw||''); } else { flashMsg('Ingen kod på stillbild. Prova zoom + ljus.'); } }).catch(function(){ flashMsg('Fel vid BD‑stillbild.'); }); return; }
+      if(window.ZXing && reader && reader.decodeFromImage){ try{ var img=new Image(); img.onload=function(){ reader.decodeFromImage(img).then(function(r){ onHit(r.getText()); }).catch(function(){ flashMsg('Ingen kod på stillbild.'); }); }; img.src=snap.toDataURL('image/png'); }catch(e){ flashMsg('ZXing saknar stillbild‑decode.'); }
+      } else { flashMsg('Stöds inte i detta läge.'); }
+    }
+
+    function flashMsg(m){ noteEl.textContent=m; setTimeout(function(){ if(noteEl.textContent===m) noteEl.textContent=''; }, 1600); }
+
+    function onHit(code){ if(!code) return; hit=true; $('#ean').value=code; log('Kod: '+code); try{ navigator.vibrate && navigator.vibrate(40); }catch(e){} stop(); }
+
+    function start(){ navigator.mediaDevices.getUserMedia({video:true,audio:false}).then(function(tmp){ tmp.getTracks().forEach(function(t){ t.stop(); }); return listCams(); }).then(function(){ var backIdx=0; for(var i=0;i<devices.length;i++){ if(/back|rear|environment/i.test(devices[i].label)){ backIdx=i; break; } } curIndex = Math.min(backIdx, Math.max(0, devices.length-1)); $('#btn-swap').disabled = devices.length<2; return startWithDevice(devices[curIndex] && devices[curIndex].deviceId); }).catch(function(){ return startWithDevice(null); }); }
+
+    $('#btn-start').onclick=start;
+    $('#btn-swap').onclick=function(){ if(!devices.length) return; curIndex=(curIndex+1)%devices.length; startWithDevice(devices[curIndex] && devices[curIndex].deviceId); };
+    $('#btn-torch').onclick=toggleTorch;
+    $('#btn-zoom-in').onclick=function(){ applyZoom(0.25); };
+    $('#btn-zoom-out').onclick=function(){ applyZoom(-0.25); };
+    $('#btn-still').onclick=stillScan;
+    $('#btn-copy').onclick=function(){ try{ navigator.clipboard.writeText($('#ean').value||''); log('EAN kopierad'); }catch(e){} };
+  </script>
+</body>
+</html>
+"""
+path = "/mnt/data/index.html"
+with open(path, "w", encoding="utf-8") as f:
+    f.write(html)
+print(path)
 
