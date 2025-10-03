@@ -4,7 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vinylregister – Android skanner + Pris & Rapport (låst vänster)</title>
-  <meta http-equiv="Cache-Control" content="no-store" />
+  <meta http-equiv="Cache-Control" content="no-store, max-age=0, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <style>
     :root{--bg:#0b1220;--ring:#1f2937;--muted:#94a3b8;--text:#e5e7eb}
     *{box-sizing:border-box}
@@ -34,7 +36,7 @@
     .tag{font-size:12px;border:1px solid #223049;background:#0a1524;border-radius:999px;padding:6px 8px;color:#cbd5e1}
 
     /* Överlägg vid träff */
-    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:16px}
+    .overlay{position:fixed;top:0;left:0;width:100dvw;height:100dvh;z-index:9999;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:16px}
     .overlay.show{display:flex}
     .sheet{width:min(620px,92vw);background:#0d1626;border:1px solid var(--ring);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
     .sheet h3{margin:0 0 8px}
@@ -47,6 +49,7 @@
     /* Rapport-summering */
     .summary{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:8px}
     .pill{background:#0b1424;border:1px solid #1e293b;border-radius:12px;padding:10px}
+    body.no-scroll{overflow:hidden}
   </style>
 </head>
 <body>
@@ -311,15 +314,15 @@
 
     // ===== Träff → överlägg + metadata/price + spara =====
     function onHit(code){ if(!code) return; hit=true; $('#ean').value=code; badge('Kod: '+code); try{ navigator.vibrate && navigator.vibrate(40);}catch(e){}
-      $('#overlay').classList.add('show'); $('#ov-ean').textContent=code; $('#ov-meta').textContent='Hämtar info…'; $('#ov-thumb').src=''; $('#ov-price').textContent=''; $('#ov-apply-avg').disabled=true; $('#ov-apply-max').disabled=true;
+      $('#overlay').classList.add('show'); document.body.classList.add('no-scroll'); $('#ov-ean').textContent=code; $('#ov-meta').textContent='Hämtar info…'; $('#ov-thumb').src=''; $('#ov-price').textContent=''; $('#ov-apply-avg').disabled=true; $('#ov-apply-max').disabled=true;
       // först MB för grundmetadata
       fetchMusicBrainz(code).then(function(m){ applyMeta(m); $('#ov-meta').textContent=[m.artist||'', m.album||'', m.ar||''].filter(Boolean).join(' • '); if(m.thumb){ $('#ov-thumb').src=m.thumb; } }).catch(function(){ $('#ov-meta').textContent='Ingen metadata hittad (du kan fylla själv)'; });
       // sedan Discogspris om token finns
       var t=($('#discogsToken').value||'').trim(); if(t){ fetchDiscogs(code,t).then(function(d){ showPrice(d); }).catch(function(){ /* ignore */ }); }
     }
 
-    $('#ov-rescan').onclick=function(){ $('#overlay').classList.remove('show'); startScannerAuto(); };
-    $('#ov-save').onclick=function(){ $('#overlay').classList.remove('show'); saveNew(); };
+    $('#ov-rescan').onclick=function(){ document.body.classList.remove('no-scroll'); $('#overlay').classList.remove('show'); startScannerAuto(); };
+    $('#ov-save').onclick=function(){ document.body.classList.remove('no-scroll'); $('#overlay').classList.remove('show'); saveNew(); };
 
     function start(){ navigator.mediaDevices.getUserMedia({video:true,audio:false}).then(function(tmp){ tmp.getTracks().forEach(function(t){ t.stop(); }); return listCams(); }).then(function(){ var backIdx=0; for(var i=0;i<devices.length;i++){ if(/back|rear|environment/i.test(devices[i].label)){ backIdx=i; break; } } curIndex=Math.min(backIdx, Math.max(0, devices.length-1)); $('#btn-swap').disabled = devices.length<2; return startWithDevice(devices[curIndex] && devices[curIndex].deviceId); }).catch(function(){ return startWithDevice(null); }); }
 
