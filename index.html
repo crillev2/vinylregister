@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vinylregister – Android (Skanna → Metadata → Autospara)</title>
+  <title>Vinylregister – Android skanner + metadata + rapport</title>
   <meta http-equiv="Cache-Control" content="no-store" />
   <style>
     :root{--bg:#0b1220;--ring:#1f2937;--muted:#94a3b8;--text:#e5e7eb}
     *{box-sizing:border-box}
-    html,body{margin:0;background:#0b1220;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
     header{position:sticky;top:0;z-index:10;background:#0c1424;border-bottom:1px solid var(--ring)}
     .bar{max-width:1100px;margin:auto;padding:10px;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}
     .brand{display:flex;gap:10px;align-items:center}
@@ -24,13 +24,28 @@
     input,select,textarea{width:100%;background:#0b1424;border:1px solid #233041;color:var(--text);padding:8px 10px;border-radius:10px}
     textarea{min-height:64px;resize:vertical}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
     table{width:100%;border-collapse:collapse}
     th,td{border-bottom:1px solid #1f2937;padding:8px;text-align:left}
     th{font-size:12px;color:#93a3b8}
-    .right{display:flex;gap:6px;justify-content:flex-end}
-    video{width:100%;max-height:64vh;background:#000;border-radius:12px}
+    .right{text-align:right}
     .muted{color:var(--muted)}
+    video{width:100%;height:auto;max-height:64vh;background:#000;border-radius:12px;object-fit:contain;object-position:center center}
     .tag{font-size:12px;border:1px solid #223049;background:#0a1524;border-radius:999px;padding:6px 8px;color:#cbd5e1}
+
+    /* Överlägg vid träff */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:16px}
+    .overlay.show{display:flex}
+    .sheet{width:min(520px,92vw);background:#0d1626;border:1px solid var(--ring);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    .sheet h3{margin:0 0 8px}
+    .flex{display:flex;gap:12px;align-items:center}
+    .thumb{width:90px;height:90px;border-radius:10px;overflow:hidden;background:#111;border:1px solid #1f2937}
+    .thumb img{width:100%;height:100%;object-fit:cover}
+    .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+
+    /* Rapport-summering */
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:8px}
+    .pill{background:#0b1424;border:1px solid #1e293b;border-radius:12px;padding:10px}
   </style>
 </head>
 <body>
@@ -40,7 +55,7 @@
         <div class="logo"></div>
         <div>
           <div style="font-weight:600">Vinylregister</div>
-          <div class="muted" style="font-size:12px">Android: Skanna → Metadata → Autospara</div>
+          <div class="muted" style="font-size:12px">Android: Skanna → Bekräfta → Metadata → Spara → Rapport/PDF</div>
         </div>
       </div>
       <div class="toolbar">
@@ -57,14 +72,18 @@
   <div class="wrap">
     <div class="grid">
       <section class="card"><div class="body">
-        <div class="row">
-          <div>
-            <label>Discogs token (valfritt)</label>
-            <input id="discogsToken" placeholder="Klistra in token här (sparas lokalt)">
-          </div>
+        <div class="row3">
           <div>
             <label>Status</label>
             <input id="note" class="muted" disabled>
+          </div>
+          <div>
+            <label>EAN</label>
+            <input id="ean">
+          </div>
+          <div style="align-self:end;display:flex;gap:8px;justify-content:flex-end">
+            <button id="btn-lookup" class="btn">Sök info</button>
+            <button id="btn-copy" class="btn">Kopiera EAN</button>
           </div>
         </div>
         <video id="video" muted playsinline></video>
@@ -72,7 +91,7 @@
       </div></section>
 
       <section class="card"><div class="body">
-        <h3 style="margin:0 0 8px">Ny post (fylls automatiskt vid skanning)</h3>
+        <h3 style="margin:0 0 8px">Metadata</h3>
         <div class="row">
           <div><label>Artist</label><input id="artist"></div>
           <div><label>Album</label><input id="album"></div>
@@ -85,137 +104,170 @@
         </div>
         <div class="row">
           <div><label>Genre/Kategori</label><input id="genre"></div>
-          <div><label>EAN</label><input id="ean"></div>
+          <div><label>Thumbnail (URL)</label><input id="thumb"></div>
         </div>
         <div class="row">
-          <div><label>Thumbnail (URL)</label><input id="thumb"></div>
-          <div><label>Pris</label><input id="forsalj" type="number" step="0.01"></div>
+          <div><label>Inköpspris</label><input id="inkop" type="number" step="0.01"></div>
+          <div><label>Faktiskt försäljningspris</label><input id="salj" type="number" step="0.01"></div>
         </div>
-        <label>Kommentar</label>
-        <textarea id="kommentar"></textarea>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" id="btn-lookup">Sök info</button>
-          <button class="btn" id="btn-save">Spara</button>
+          <button class="btn" id="btn-save">Spara post</button>
           <button class="btn" id="btn-new">Ny tom</button>
-          <button class="btn" id="btn-export">Exportera CSV</button>
-          <button class="btn" id="btn-import">Importera CSV</button>
-          <button class="btn" id="btn-reset">Rensa alla</button>
-          <button class="btn" id="btn-open-discogs" disabled>Öppna i Discogs</button>
         </div>
       </div></section>
 
       <section class="card"><div class="body">
-        <h3 style="margin:0 0 8px">Register</h3>
-        <div class="row" style="grid-template-columns:1fr 1fr">
-          <input id="search" placeholder="Sök…">
-          <select id="filter-tag"><option value="">Alla etiketter</option><option>Nyinkommet</option><option>Ja tack</option><option>REA</option></select>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="margin:0">Register & Rapport</h3>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="btn-export-pdf">Exportera PDF</button>
+            <button class="btn" id="btn-export-csv">Exportera CSV</button>
+          </div>
         </div>
-        <div style="overflow:auto;margin-top:8px">
+        <div class="summary">
+          <div class="pill"><div class="muted">Antal</div><div id="sum-antal" style="font-weight:600">0</div></div>
+          <div class="pill"><div class="muted">Sum inköp</div><div id="sum-inkop" style="font-weight:600">0</div></div>
+          <div class="pill"><div class="muted">Sum sålt</div><div id="sum-salj" style="font-weight:600">0</div></div>
+          <div class="pill"><div class="muted">Marginal</div><div id="sum-marg" style="font-weight:600">0</div></div>
+        </div>
+        <div style="overflow:auto">
           <table id="tbl"><thead><tr>
-            <th>Bild</th><th>Artist</th><th>Album</th><th>Format</th><th>År</th><th>Genre</th><th>EAN</th><th class="right">Pris</th><th class="right">Åtgärd</th>
+            <th>Bild</th><th>Artist</th><th>Album</th><th>År</th><th>Format</th><th>EAN</th><th class="right">Inköp</th><th class="right">Sålt</th><th class="right">Marginal</th><th class="right">Åtgärd</th>
           </tr></thead><tbody></tbody></table>
         </div>
       </div></section>
     </div>
   </div>
 
+  <!-- Bekräftelse-överlägg -->
+  <div class="overlay" id="overlay">
+    <div class="sheet">
+      <h3>Träff</h3>
+      <div class="flex">
+        <div class="thumb"><img id="ov-thumb" alt="thumb"></div>
+        <div>
+          <div class="muted">EAN</div>
+          <div id="ov-ean" style="font-weight:600"></div>
+          <div id="ov-meta" class="muted"></div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="ov-rescan">Skanna igen</button>
+        <button class="btn" id="ov-save">Spara</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // ===== Helpers / Storage =====
-    function $(q){return document.querySelector(q)}; function setText(el,t){ if(el) el.value=t; }
-    var statusEl=document.getElementById('status'); var noteEl=document.getElementById('note');
-    function badge(t){ statusEl.textContent=t; }
-    var tokenKey='discogs.token'; var storeKey='vinylregister.v1';
-    document.addEventListener('DOMContentLoaded', function(){ try{ var v=localStorage.getItem(tokenKey)||''; document.getElementById('discogsToken').value=v; }catch(e){} });
-    document.getElementById('discogsToken').addEventListener('input', function(){ try{ localStorage.setItem(tokenKey, this.value.trim()); }catch(e){} });
+    function $(q){return document.querySelector(q)}; function $$(q){return Array.prototype.slice.call(document.querySelectorAll(q))}
+    function setVal(id,v){ var el=$(id); if(el) el.value=v||''; }
+    var statusEl=$('#status'), noteEl=$('#note'); function badge(t){ statusEl.textContent=t; }
+    function num(n){ n=+n; return isFinite(n)? n:0; }
 
-    var data=(function(){ try{return JSON.parse(localStorage.getItem(storeKey)||'[]')}catch(e){return []} })();
-    function saveStore(){ try{ localStorage.setItem(storeKey, JSON.stringify(data)); }catch(e){}; render(); }
-    function getForm(){ return {
-      artist: $('#artist').value.trim(), album: $('#album').value.trim(), format: $('#format').value, ar: $('#ar').value.trim(),
-      genre: $('#genre').value.trim(), ean: $('#ean').value.trim(), thumb: $('#thumb').value.trim(), forsalj:+($('#forsalj').value||0), kommentar: $('#kommentar').value.trim(),
-      id: (crypto&&crypto.randomUUID? crypto.randomUUID(): String(Date.now())+Math.random().toString(16).slice(2)), ts: Date.now(), tag:''
-    }; }
-    function setForm(o){ o=o||{}; $('#artist').value=o.artist||''; $('#album').value=o.album||''; $('#format').value=o.format||'LP'; $('#ar').value=o.ar||''; $('#genre').value=o.genre||''; $('#ean').value=o.ean||''; $('#thumb').value=o.thumb||''; $('#forsalj').value=o.forsalj||''; $('#kommentar').value=o.kommentar||''; }
+    var storeKey='vinylregister.v1';
+    var db = (function(){ try{return JSON.parse(localStorage.getItem(storeKey)||'[]')}catch(e){return []} })();
+    function saveDB(){ try{ localStorage.setItem(storeKey, JSON.stringify(db)); }catch(e){}; render(); }
 
-    function render(){ var q=$('#search').value.trim().toLowerCase(); var tbody=$('#tbl tbody'); tbody.innerHTML='';
-      data.filter(function(r){ var hay=[r.artist,r.album,r.genre,r.ean].join(' ').toLowerCase(); return q? hay.indexOf(q)>-1 : true; })
-        .forEach(function(r){ var tr=document.createElement('tr'); tr.innerHTML=
-          '<td>'+(r.thumb?('<img src="'+r.thumb+'" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #1f2937">'):'')+'</td>'+
-          '<td>'+escapeHtml(r.artist||'')+'</td><td>'+escapeHtml(r.album||'')+'</td><td>'+escapeHtml(r.format||'')+'</td><td>'+escapeHtml(r.ar||'')+'</td>'+
-          '<td>'+escapeHtml(r.genre||'')+'</td><td>'+escapeHtml(r.ean||'')+'</td>'+
-          '<td class="right">'+(r.forsalj? Number(r.forsalj).toFixed(2):'')+'</td>'+
-          '<td class="right"><button class="btn" data-edit="'+r.id+'">Redigera</button><button class="btn" data-del="'+r.id+'">Radera</button></td>';
-          tbody.appendChild(tr); });
-      $$('[data-edit]').forEach(function(b){ b.onclick=function(){ var r=data.find(function(x){return x.id===b.dataset.edit}); if(!r) return; setForm(r); document.getElementById('btn-save').onclick=function(){ var upd=getForm(); r.artist=upd.artist;r.album=upd.album;r.format=upd.format;r.ar=upd.ar;r.genre=upd.genre;r.ean=upd.ean;r.thumb=upd.thumb;r.forsalj=upd.forsalj;r.kommentar=upd.kommentar; saveStore(); document.getElementById('btn-save').onclick=saveNew; setForm({}); }; }; });
-      $$('[data-del]').forEach(function(b){ b.onclick=function(){ if(confirm('Radera posten?')){ data=data.filter(function(x){return x.id!==b.dataset.del}); saveStore(); } }; });
+    function toRow(r){
+      var m = num(r.salj) - num(r.inkop);
+      var tr=document.createElement('tr');
+      tr.innerHTML = '<td>'+(r.thumb?('<img src="'+r.thumb+'" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #1f2937">'):'')+'</td>'+
+        '<td>'+esc(r.artist)+'</td><td>'+esc(r.album)+'</td><td>'+esc(r.ar)+'</td><td>'+esc(r.format)+'</td><td>'+esc(r.ean)+'</td>'+
+        '<td class="right">'+fmt(num(r.inkop))+'</td><td class="right">'+fmt(num(r.salj))+'</td><td class="right">'+fmt(m)+'</td>'+
+        '<td class="right"><button class="btn" data-edit="'+r.id+'">Redigera</button> <button class="btn" data-del="'+r.id+'">Radera</button></td>';
+      return tr;
     }
-    function $$(q){ return Array.prototype.slice.call(document.querySelectorAll(q)); }
-    function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]}); }
+    function esc(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]}); }
+    function fmt(n){ return n? n.toFixed(2):''; }
 
-    function saveNew(){ var r=getForm(); if(!r.artist && !r.album){ alert('Minst Artist eller Album behövs.'); return; } data.unshift(r); saveStore(); flash('Sparat'); setForm({}); }
-    document.getElementById('btn-save').onclick=saveNew; document.getElementById('btn-new').onclick=function(){ setForm({}); };
-    document.getElementById('btn-reset').onclick=function(){ if(confirm('Rensa alla poster?')){ data=[]; saveStore(); }};
+    function getForm(){ return {
+      id: (crypto&&crypto.randomUUID? crypto.randomUUID(): String(Date.now())+Math.random().toString(16).slice(2)),
+      ts: Date.now(), ean: $('#ean').value.trim(), artist: $('#artist').value.trim(), album: $('#album').value.trim(), ar: $('#ar').value.trim(),
+      format: $('#format').value, genre: $('#genre').value.trim(), thumb: $('#thumb').value.trim(), inkop: num($('#inkop').value), salj: num($('#salj').value)
+    }; }
+    function setForm(o){ setVal('#ean', o.ean); setVal('#artist', o.artist); setVal('#album', o.album); setVal('#ar', o.ar); $('#format').value=o.format||'LP'; setVal('#genre', o.genre); setVal('#thumb', o.thumb); setVal('#inkop', o.inkop); setVal('#salj', o.salj); }
 
-    // CSV import/export
-    document.getElementById('btn-export').onclick=function(){ var headers=['artist','album','format','ar','genre','ean','thumb','forsalj','kommentar','tag','ts']; var lines=[headers.join(';')]; data.forEach(function(r){ lines.push(headers.map(function(h){ return csvEsc(r[h]!=null?r[h]:''); }).join(';')); }); var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'})); a.download='vinylregister_'+new Date().toISOString().slice(0,10)+'.csv'; a.click(); };
-    document.getElementById('btn-import').onclick=function(){ var inp=document.createElement('input'); inp.type='file'; inp.accept='.csv,text/csv'; inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f) return; f.text().then(function(text){
-      text=(text||'').replace(/\r/g,''); var rows=text.split('\n').filter(function(x){return x}); var head=rows.shift(); if(!head) return; var headers=head.split(';').map(function(h){return h.trim()}); rows.forEach(function(line){ var cols=parseSemi(line); var r={}; headers.forEach(function(h,i){ r[h]=cols[i]||''; }); r.id=(crypto&&crypto.randomUUID? crypto.randomUUID(): String(Date.now())+Math.random().toString(16).slice(2)); data.push(r); }); saveStore(); }); }; inp.click(); };
-    function csvEsc(v){ if(typeof v==='number') return String(v); var s=String(v).replace(/"/g,'""'); return (s.indexOf(';')>-1||s.indexOf('\n')>-1)? '"'+s+'"' : s; }
-    function parseSemi(line){ var out=[],cur='',q=false; for(var i=0;i<line.length;i++){ var ch=line[i]; if(ch==='"'){ if(q && line[i+1]==='"'){cur+='"'; i++;} else q=!q; } else if(ch===';'&&!q){ out.push(cur); cur=''; } else cur+=ch; } out.push(cur); return out; }
+    function render(){ var tbody=$('#tbl tbody'); tbody.innerHTML=''; db.forEach(function(r){ tbody.appendChild(toRow(r)); });
+      // summering
+      var antal=db.length, sumIn=0, sumUt=0; db.forEach(function(r){ sumIn+=num(r.inkop); sumUt+=num(r.salj); });
+      $('#sum-antal').textContent=String(antal); $('#sum-inkop').textContent=fmt(sumIn); $('#sum-salj').textContent=fmt(sumUt); $('#sum-marg').textContent=fmt(sumUt-sumIn);
+      // händelser
+      $$('[data-edit]').forEach(function(b){ b.onclick=function(){ var r=db.find(function(x){return x.id===b.dataset.edit}); if(!r) return; var n=getForm(); // återanvänd form-ID
+        setForm(r); $('#btn-save').onclick=function(){ var upd=getForm(); r.artist=upd.artist; r.album=upd.album; r.ar=upd.ar; r.format=upd.format; r.genre=upd.genre; r.ean=upd.ean; r.thumb=upd.thumb; r.inkop=upd.inkop; r.salj=upd.salj; saveDB(); $('#btn-save').onclick=saveNew; setForm({}); }; } });
+      $$('[data-del]').forEach(function(b){ b.onclick=function(){ if(confirm('Radera posten?')){ db=db.filter(function(x){return x.id!==b.dataset.del}); saveDB(); } }; });
+    }
 
-    // ===== Metadata lookup =====
-    var lastMeta=null; function digitsOnly(s){ return (s||'').replace(/\D/g,''); }
+    function saveNew(){ var r=getForm(); if(!r.ean && !r.artist && !r.album){ alert('Minst EAN eller Artist/Album behövs.'); return; } db.unshift(r); saveDB(); flash('Sparat'); setForm({}); }
+    $('#btn-save').onclick=saveNew; $('#btn-new').onclick=function(){ setForm({}); };
+
+    // CSV + PDF
+    $('#btn-export-csv').onclick=function(){ var headers=['ean','artist','album','ar','format','genre','thumb','inkop','salj','marginal','ts']; var rows=[headers.join(';')]; db.forEach(function(r){ var m=(num(r.salj)-num(r.inkop)).toFixed(2); rows.push([r.ean,r.artist,r.album,r.ar,r.format,r.genre,r.thumb,fmt(r.inkop)||'0.00',fmt(r.salj)||'0.00',m,r.ts].map(csvEsc).join(';')); }); var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([rows.join('\n')],{type:'text/csv'})); a.download='vinylregister_'+new Date().toISOString().slice(0,10)+'.csv'; a.click(); };
+    function csvEsc(v){ v=String(v==null?'':v).replace(/\"/g,'\"\"'); return v.indexOf(';')>-1||v.indexOf('\n')>-1? '\"'+v+'\"' : v; }
+
+    $('#btn-export-pdf').onclick=function(){ ensurePDF(function(){ var doc=new window.jspdf.jsPDF({unit:'pt',format:'a4'}); doc.text('Vinylregister',40,40);
+      var headers=[["Bild","Artist","Album","År","Format","EAN","Inköp","Sålt","Marginal"]];
+      var body=db.map(function(r){ return ['', r.artist||'', r.album||'', r.ar||'', r.format||'', r.ean||'', fmt(r.inkop)||'0.00', fmt(r.salj)||'0.00', (num(r.salj)-num(r.inkop)).toFixed(2)]; });
+      doc.autoTable({head:headers, body:body, startY:60, styles:{fontSize:8}});
+      doc.save('vinylregister_'+new Date().toISOString().slice(0,10)+'.pdf'); }); };
+
+    function ensurePDF(cb){ if(window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.prototype.autoTable){ cb(); return; }
+      loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', function(){ loadScript('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js', cb, function(){ flash('Kunde inte ladda pdf-plugin'); }); }, function(){ flash('Kunde inte ladda jsPDF'); }); }
+
+    // ===== Metadata lookup (MusicBrainz + CoverArt) =====
+    function digitsOnly(s){ return (s||'').replace(/\D/g,''); }
     function mapFormat(formats){ var f=(formats||[]).map(function(x){return String(x).toLowerCase()}); function has(s){return f.some(function(x){return x.indexOf(s)>-1})}
-      if(has('lp')||has('vinyl')||has('12')) return 'LP'; if(has('7"')||has('single')) return 'Single'; if(has('ep'))return 'EP'; if(has('cd'))return 'CD'; if(has('cassette')||has('kassett'))return 'Kassett'; return ''; }
-    function applyMeta(meta){ if(!meta) return; if(meta.artist && !$('#artist').value) $('#artist').value=meta.artist; if(meta.album && !$('#album').value) $('#album').value=meta.album; if(meta.ar && !$('#ar').value) $('#ar').value=meta.ar; if(meta.format && !$('#format').value) $('#format').value=meta.format; if(meta.genre && !$('#genre').value) $('#genre').value=meta.genre; if(meta.thumb && !$('#thumb').value) $('#thumb').value=meta.thumb; }
-    function updateDiscogsBtn(){ var btn=document.getElementById('btn-open-discogs'); var url=lastMeta&&lastMeta.url||''; btn.disabled=!url; btn.onclick=function(){ if(url) window.open(url,'_blank'); } }
+      if(has('lp')||has('vinyl')||has('12')) return 'LP'; if(has('7\"')||has('single')) return 'Single'; if(has('ep'))return 'EP'; if(has('cd'))return 'CD'; if(has('cassette')||has('kassett'))return 'Kassett'; return ''; }
 
-    function fetchDiscogs(ean, token){ return new Promise(function(resolve,reject){ if(!token) return reject('notoken'); var url='https://api.discogs.com/database/search?barcode='+encodeURIComponent(ean)+'&type=release&per_page=5';
-      fetch(url,{headers:{'Authorization':'Discogs token='+token}}).then(function(res){ if(!res.ok) throw new Error('Discogs '+res.status); return res.json(); })
-      .then(function(js){ if(!js.results||!js.results.length) throw new Error('Discogs tomt'); var first=js.results[0]; var meta={source:'Discogs', artist:(first.artist||'').replace(/\s\(\d+\)$/,'').trim(), album:first.title||'', ar:String(first.year||''), format:mapFormat(first.format||[]), genre:(first.genre||[]).join(', '), thumb:first.cover_image||'', url:first.uri||''};
-        if(first.resource_url){ fetch(first.resource_url,{headers:{'Authorization':'Discogs token='+token}}).then(function(r){ if(!r.ok) return meta; return r.json(); }).then(function(dj){ if(dj){ meta.artist=((dj.artists||[]).map(function(a){return a.name}).join(', ')||meta.artist).replace(/\s\(\d+\)$/,'').trim(); meta.album=dj.title||meta.album; meta.ar=String(dj.year||meta.ar||''); var fmts=(dj.formats||[]).map(function(f){return f.name}); meta.format=mapFormat(fmts.concat(first.format||[])); var g=(dj.genres||first.genre||[]).concat(dj.styles||[]).filter(Boolean).join(', '); meta.genre=g; meta.thumb=(dj.images&&dj.images[0]&&dj.images[0].uri)||meta.thumb; meta.url=dj.uri||meta.url; } resolve(meta); }).catch(function(){ resolve(meta); }); }
-        else resolve(meta);
-      }).catch(reject); }); }
-    function fetchMusicBrainz(ean){ return fetch('https://musicbrainz.org/ws/2/release/?query=barcode:'+encodeURIComponent(ean)+'&fmt=json&limit=5',{headers:{'Accept':'application/json'}})
-      .then(function(r){ if(!r.ok) throw new Error('MB '+r.status); return r.json(); })
-      .then(function(js){ var rel=js.releases&&js.releases[0]; if(!rel) throw new Error('MB tomt'); var artist=(rel['artist-credit']||[]).map(function(a){return a.name || (a.artist&&a.artist.name)||''}).filter(Boolean).join(', ');
-        return {source:'MusicBrainz', artist:artist, album:rel.title||'', ar:(rel.date||'').slice(0,4), format:String((rel.media&&rel.media[0]&&rel.media[0].format)||'').toUpperCase().replace('VINYL','LP').replace('COMPACT DISC','CD'), genre:String(rel.country||''), thumb:'https://coverartarchive.org/release/'+rel.id+'/front-500', url:'https://musicbrainz.org/release/'+rel.id}; }); }
+    function fetchMusicBrainz(ean){ ean=digitsOnly(ean); if(!ean) return Promise.reject('noean');
+      return fetch('https://musicbrainz.org/ws/2/release/?query=barcode:'+encodeURIComponent(ean)+'&fmt=json&limit=5',{headers:{'Accept':'application/json'}})
+        .then(function(r){ if(!r.ok) throw new Error('MB '+r.status); return r.json(); })
+        .then(function(js){ var rel=js.releases&&js.releases[0]; if(!rel) throw new Error('MB tomt'); var artist=(rel['artist-credit']||[]).map(function(a){return a.name || (a.artist&&a.artist.name)||''}).filter(Boolean).join(', ');
+          return {artist:artist, album:rel.title||'', ar:(rel.date||'').slice(0,4), format:String((rel.media&&rel.media[0]&&rel.media[0].format)||'').toUpperCase().replace('VINYL','LP').replace('COMPACT DISC','CD'), thumb:'https://coverartarchive.org/release/'+rel.id+'/front-500'}; }); }
 
-    function lookupByEAN(eanRaw){ var ean=digitsOnly(eanRaw); if(!ean){ noteEl.value=''; lastMeta=null; updateDiscogsBtn(); return Promise.resolve(null); }
-      noteEl.value='Söker metadata…'; var token=(document.getElementById('discogsToken').value||'').trim();
-      return new Promise(function(resolve){ (token? fetchDiscogs(ean, token): Promise.reject('notoken')).then(function(d){ applyMeta(d); lastMeta=d; updateDiscogsBtn(); noteEl.value='Träff: Discogs'; resolve(d); })
-        .catch(function(){ fetchMusicBrainz(ean).then(function(m){ applyMeta(m); lastMeta=m; updateDiscogsBtn(); noteEl.value='Träff: MusicBrainz'; resolve(m); })
-          .catch(function(){ lastMeta=null; updateDiscogsBtn(); noteEl.value='Ingen träff'; resolve(null); }); }); }); }
+    function applyMeta(m){ if(!m) return; if(m.artist && !$('#artist').value) $('#artist').value=m.artist; if(m.album && !$('#album').value) $('#album').value=m.album; if(m.ar && !$('#ar').value) $('#ar').value=m.ar; if(m.format && !$('#format').value) $('#format').value=m.format; if(m.thumb && !$('#thumb').value) $('#thumb').value=m.thumb; }
 
-    document.getElementById('btn-lookup').onclick=function(){ lookupByEAN($('#ean').value).then(function(meta){ if(meta) autoSave(); }); };
-
-    function autoSave(){ var r=getForm(); if(!r.artist && !r.album) return; data.unshift(r); saveStore(); try{ navigator.vibrate && navigator.vibrate(40);}catch(e){} badge('Skannad & sparad'); setForm({}); }
+    $('#btn-lookup').onclick=function(){ var e=$('#ean').value; noteEl.value='Söker metadata…'; fetchMusicBrainz(e).then(function(m){ applyMeta(m); noteEl.value='Träff från MusicBrainz'; }).catch(function(){ noteEl.value='Ingen träff'; }); };
 
     // ===== Kamera + Skanner (BD → ZXing) =====
-    var video=document.getElementById('video'); var curStream=null, devices=[], curIndex=0, haveTorch=false, curZoom=1, reader=null, usingBD=false, detector=null, running=false, hit=false;
-    function stopCam(){ try{ if(reader&&reader.reset) reader.reset(); }catch(e){}; reader=null; try{ if(curStream){ curStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}; curStream=null; running=false; hit=false; }
-    function applyZoom(delta){ try{ var track=curStream&&curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('zoom' in caps)) return; curZoom=Math.max(caps.zoom.min||1, Math.min((caps.zoom.max||1),(curZoom+delta))); track.applyConstraints({advanced:[{zoom:curZoom}]}); }catch(e){} }
-    function toggleTorch(){ try{ var track=curStream&&curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('torch' in caps)) return; haveTorch=!haveTorch; track.applyConstraints({advanced:[{torch:haveTorch}]}); document.getElementById('btn-torch').textContent = haveTorch?'Ficklampa: På':'Ficklampa'; }catch(e){} }
-    function listCams(){ return navigator.mediaDevices.enumerateDevices().then(function(all){ devices=all.filter(function(d){return d.kind==='videoinput'}); document.getElementById('btn-swap').disabled = devices.length<2; }); }
-    function startWithDevice(deviceId){ stopCam(); badge('Init kamera…'); var constraints={ video: deviceId? {deviceId:{exact:deviceId}} : {facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30}}, audio:false };
-      return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){ video.srcObject=stream; curStream=stream; return video.play(); }).then(function(){ var track=curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(track&&track.getCapabilities){ var caps=track.getCapabilities(); document.getElementById('btn-zoom-in').disabled=!(caps.zoom); document.getElementById('btn-zoom-out').disabled=!(caps.zoom); document.getElementById('btn-torch').disabled=!(caps.torch); } else { document.getElementById('btn-zoom-in').disabled=true; document.getElementById('btn-zoom-out').disabled=true; document.getElementById('btn-torch').disabled=true; } return listCams(); })
-        .then(function(){ badge('Kamera igång'); startScannerAuto(); }).catch(function(e){ badge('Kamerafel: '+(e&&e.name||e)); }); }
+    var video=$('#video'); var curStream=null, devices=[], curIndex=0, haveTorch=false, curZoom=1, reader=null, usingBD=false, detector=null, running=false, hit=false;
 
-    function startScannerAuto(){ if('BarcodeDetector' in window){ usingBD=true; startBD(); } else { usingBD=false; ensureZXing(startZXing); } }
+    function stopCam(){ try{ if(reader&&reader.reset) reader.reset(); }catch(e){}; reader=null; try{ if(curStream){ curStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}; curStream=null; running=false; }
+    function applyZoom(delta){ try{ var track=curStream&&curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('zoom' in caps)) return; curZoom=Math.max(caps.zoom.min||1, Math.min((caps.zoom.max||1),(curZoom+delta))); track.applyConstraints({advanced:[{zoom:curZoom}]}); }catch(e){} }
+    function toggleTorch(){ try{ var track=curStream&&curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('torch' in caps)) return; haveTorch=!haveTorch; track.applyConstraints({advanced:[{torch:haveTorch}]}); $('#btn-torch').textContent = haveTorch?'Ficklampa: På':'Ficklampa'; }catch(e){} }
+    function listCams(){ return navigator.mediaDevices.enumerateDevices().then(function(all){ devices=all.filter(function(d){ return d.kind==='videoinput'; }); $('#btn-swap').disabled = devices.length<2; }); }
+
+    function startWithDevice(deviceId){
+      stopCam(); badge('Init kamera…');
+      var constraints={ video: deviceId? {deviceId:{exact:deviceId}} : {facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30}}, audio:false };
+      return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){ video.srcObject=stream; curStream=stream; return video.play(); }).then(function(){ var track=curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(track&&track.getCapabilities){ var caps=track.getCapabilities(); $('#btn-zoom-in').disabled=!(caps.zoom); $('#btn-zoom-out').disabled=!(caps.zoom); $('#btn-torch').disabled=!(caps.torch); } else { $('#btn-zoom-in').disabled=true; $('#btn-zoom-out').disabled=true; $('#btn-torch').disabled=true; } return listCams(); })
+      .then(function(){ badge('Kamera igång'); startScannerAuto(); }).catch(function(e){ badge('Kamerafel: '+(e&&e.name||e)); }); }
+
+    function startScannerAuto(){ hit=false; if('BarcodeDetector' in window){ usingBD=true; startBD(); } else { usingBD=false; ensureZXing(startZXing); } }
+
     function startBD(){ try{ detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); running=true; loopBD(); noteEl.value='(Inbyggd skanner)'; }catch(e){ usingBD=false; ensureZXing(startZXing); } }
     function loopBD(){ if(!running||hit) return; if(video.readyState>=2){ detector.detect(video).then(function(res){ if(res&&res.length){ var code=res[0].rawValue||res[0].raw||''; if(code){ onHit(code); return; } } setTimeout(loopBD,60); }).catch(function(){ setTimeout(loopBD,120); }); } else { setTimeout(loopBD,120); } }
 
     function loadScript(src, ok, err){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=err||function(){}; document.head.appendChild(s); }
     function ensureZXing(cb){ if(window.ZXing&&window.ZXing.BrowserMultiFormatReader){ cb(); return; } noteEl.value='Laddar ZXing…'; var urls=['https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js','https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js']; var i=0; (function next(){ if(i>=urls.length){ noteEl.value='Kunde inte ladda ZXing (blockerat?)'; return;} loadScript(urls[i], function(){ noteEl.value='(ZXing)'; cb(); }, function(){ i++; next(); }); })(); }
-    function startZXing(){ if(!window.ZXing||!window.ZXing.BrowserMultiFormatReader){ noteEl.value='ZXing saknas'; return;} badge('Startar ZXing…'); try{ var ZX=window.ZXing; try{ reader=new ZX.BrowserMultiFormatReader(); }catch(e){ reader=new ZX.BrowserMultiFormatReader(); } if(reader.decodeFromVideoElementContinuously){ reader.decodeFromVideoElementContinuously(video, function(result, err){ if(result){ onHit(result.getText()); } }); } else { (function loop(){ reader.decodeFromVideoElement(video).then(function(res){ onHit(res.getText()); }).catch(function(){ setTimeout(loop,120); }); })(); } }catch(e){ noteEl.value='ZXing-fel: '+e; } }
+    function startZXing(){ if(!window.ZXing||!window.ZXing.BrowserMultiFormatReader){ noteEl.value='ZXing saknas'; return;} badge('Startar ZXing…'); try{ var ZX=window.ZXing; reader=new ZX.BrowserMultiFormatReader(); if(reader.decodeFromVideoElementContinuously){ reader.decodeFromVideoElementContinuously(video, function(result, err){ if(result && !hit){ onHit(result.getText()); } }); } else { (function loop(){ if(hit) return; reader.decodeFromVideoElement(video).then(function(res){ onHit(res.getText()); }).catch(function(){ setTimeout(loop,120); }); })(); } }catch(e){ noteEl.value='ZXing-fel: '+e; } }
 
-    function onHit(code){ if(!code) return; $('#ean').value=code; badge('Kod: '+code); try{ navigator.vibrate && navigator.vibrate(40);}catch(e){}; lookupByEAN(code).then(function(meta){ if(meta) autoSave(); }); stopCam(); }
+    // ===== Träff → överlägg + metadata + spara =====
+    function onHit(code){ if(!code) return; hit=true; $('#ean').value=code; badge('Kod: '+code); try{ navigator.vibrate && navigator.vibrate(40);}catch(e){}
+      $('#overlay').classList.add('show'); $('#ov-ean').textContent=code; $('#ov-meta').textContent='Hämtar info…'; $('#ov-thumb').src='';
+      fetchMusicBrainz(code).then(function(m){ applyMeta(m); $('#ov-meta').textContent=[m.artist||'', m.album||'', m.ar||''].filter(Boolean).join(' • '); if(m.thumb){ $('#ov-thumb').src=m.thumb; } }).catch(function(){ $('#ov-meta').textContent='Ingen metadata hittad (du kan fylla själv)'; });
+    }
 
-    function start(){ navigator.mediaDevices.getUserMedia({video:true,audio:false}).then(function(tmp){ tmp.getTracks().forEach(function(t){ t.stop(); }); return listCams(); }).then(function(){ var backIdx=0; for(var i=0;i<devices.length;i++){ if(/back|rear|environment/i.test(devices[i].label)){ backIdx=i; break; } } curIndex=Math.min(backIdx, Math.max(0, devices.length-1)); document.getElementById('btn-swap').disabled = devices.length<2; return startWithDevice(devices[curIndex] && devices[curIndex].deviceId); }).catch(function(){ return startWithDevice(null); }); }
+    $('#ov-rescan').onclick=function(){ $('#overlay').classList.remove('show'); startScannerAuto(); };
+    $('#ov-save').onclick=function(){ $('#overlay').classList.remove('show'); saveNew(); };
 
-    document.getElementById('btn-start').onclick=start; document.getElementById('btn-swap').onclick=function(){ if(!devices.length) return; curIndex=(curIndex+1)%devices.length; startWithDevice(devices[curIndex] && devices[curIndex].deviceId); };
-    document.getElementById('btn-torch').onclick=toggleTorch; document.getElementById('btn-zoom-in').onclick=function(){ applyZoom(0.25); }; document.getElementById('btn-zoom-out').onclick=function(){ applyZoom(-0.25); };
+    function start(){ navigator.mediaDevices.getUserMedia({video:true,audio:false}).then(function(tmp){ tmp.getTracks().forEach(function(t){ t.stop(); }); return listCams(); }).then(function(){ var backIdx=0; for(var i=0;i<devices.length;i++){ if(/back|rear|environment/i.test(devices[i].label)){ backIdx=i; break; } } curIndex=Math.min(backIdx, Math.max(0, devices.length-1)); $('#btn-swap').disabled = devices.length<2; return startWithDevice(devices[curIndex] && devices[curIndex].deviceId); }).catch(function(){ return startWithDevice(null); }); }
 
+    $('#btn-start').onclick=start; $('#btn-swap').onclick=function(){ if(!devices.length) return; curIndex=(curIndex+1)%devices.length; startWithDevice(devices[curIndex] && devices[curIndex].deviceId); };
+    $('#btn-torch').onclick=toggleTorch; $('#btn-zoom-in').onclick=function(){ applyZoom(0.25); }; $('#btn-zoom-out').onclick=function(){ applyZoom(-0.25); };
+    $('#btn-copy').onclick=function(){ try{ navigator.clipboard.writeText($('#ean').value||''); badge('EAN kopierad'); }catch(e){} };
+
+    // Nytt vid start: auto-render
     render();
   </script>
 </body>
