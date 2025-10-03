@@ -3,301 +3,131 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vinylregister – Android skanner + metadata + pris/rapport</title>
+  <title>Vinylregister – Android skanner (BD + ZXing + Stillbild)</title>
   <meta http-equiv="Cache-Control" content="no-store" />
   <style>
-    :root{--bg:#0b1220;--ring:#1f2937;--muted:#94a3b8;--text:#e5e7eb}
-    *{box-sizing:border-box}
-    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
-    header{position:sticky;top:0;z-index:10;background:#0c1424;border-bottom:1px solid var(--ring)}
-    .bar{max-width:1100px;margin:auto;padding:10px;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}
-    .brand{display:flex;gap:10px;align-items:center}
-    .logo{width:28px;height:28px;border-radius:8px;background:conic-gradient(from 210deg at 50% 50%,#60a5fa,#34d399,#a78bfa,#60a5fa)}
-    .toolbar{display:flex;flex-wrap:wrap;gap:8px}
+    body{margin:0;background:#0b1220;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    header{position:sticky;top:0;background:#0c1424;border-bottom:1px solid #1f2937}
+    .bar{max-width:1000px;margin:auto;padding:10px;display:flex;gap:10px;align-items:center;justify-content:space-between}
     .btn{background:#0b1424;border:1px solid #1e293b;color:#dbeafe;border-radius:10px;padding:8px 12px;cursor:pointer}
     .btn:disabled{opacity:.5;cursor:not-allowed}
-    .wrap{max-width:1100px;margin:12px auto;padding:12px}
-    .grid{display:grid;grid-template-columns:1fr;gap:12px}
-    .card{background:#0e1626;border:1px solid var(--ring);border-radius:14px}
-    .card .body{padding:12px}
-    label{display:block;font-size:12px;color:#9ca3af;margin:6px 0 4px}
-    input,select,textarea{width:100%;background:#0b1424;border:1px solid #233041;color:var(--text);padding:8px 10px;border-radius:10px}
-    textarea{min-height:64px;resize:vertical}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-    table{width:100%;border-collapse:collapse}
-    th,td{border-bottom:1px solid #1f2937;padding:8px;text-align:left}
-    th{font-size:12px;color:#93a3b8}
-    .right{text-align:right}
-    .muted{color:var(--muted)}
-    video{width:100%;height:auto;max-height:64vh;background:#000;border-radius:12px;object-fit:contain;object-position:center center}
+    .muted{color:#94a3b8}
+    video{width:100%;height:auto;max-height:68vh;background:#000;border-radius:12px;object-fit:contain;object-position:left center;display:block}
+    .wrap{max-width:1000px;margin:12px auto;padding:12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    select,input{background:#0b1424;color:#e5e7eb;border:1px solid #233041;border-radius:8px;padding:8px}
     .tag{font-size:12px;border:1px solid #223049;background:#0a1524;border-radius:999px;padding:6px 8px;color:#cbd5e1}
-
-    /* Överlägg vid träff */
-    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:16px}
-    .overlay.show{display:flex}
-    .sheet{width:min(560px,92vw);background:#0d1626;border:1px solid var(--ring);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-    .sheet h3{margin:0 0 8px}
-    .flex{display:flex;gap:12px;align-items:center}
-    .thumb{width:100px;height:100px;border-radius:10px;overflow:hidden;background:#111;border:1px solid #1f2937}
-    .thumb img{width:100%;height:100%;object-fit:cover}
-    .actions{display:flex;gap:8px;justify-content:space-between;margin-top:8px}
-    .left-actions{display:flex;gap:8px}
-
-    /* Rapport-summering */
-    .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:8px}
-    .pill{background:#0b1424;border:1px solid #1e293b;border-radius:12px;padding:10px}
   </style>
 </head>
 <body>
-  <header>
-    <div class="bar">
-      <div class="brand">
-        <div class="logo"></div>
-        <div>
-          <div style="font-weight:600">Vinylregister</div>
-          <div class="muted" style="font-size:12px">Android: Skanna → Bekräfta → Metadata/Pris → Spara → Rapport/PDF</div>
-        </div>
-      </div>
-      <div class="toolbar">
-        <button id="btn-start" class="btn">Starta skanning</button>
-        <button id="btn-swap" class="btn" disabled>Byt kamera</button>
-        <button id="btn-torch" class="btn" disabled>Ficklampa</button>
-        <button id="btn-zoom-in" class="btn" disabled>Zoom +</button>
-        <button id="btn-zoom-out" class="btn" disabled>Zoom −</button>
-        <span id="status" class="tag">Init</span>
-      </div>
+  <header><div class="bar">
+    <strong>Vinylregister – Android skanner</strong>
+    <div class="row">
+      <button id="btn-start" class="btn">Starta skanning</button>
+      <button id="btn-swap" class="btn" disabled>Byt kamera</button>
+      <button id="btn-torch" class="btn" disabled>Ficklampa</button>
+      <button id="btn-zoom-in" class="btn" disabled>Zoom +</button>
+      <button id="btn-zoom-out" class="btn" disabled>Zoom −</button>
+      <button id="btn-still" class="btn" disabled>Stillbild‑scan</button>
+      <button id="btn-fit" class="btn">Vy: Center</button>
+      <span id="status" class="tag">Init</span>
     </div>
-  </header>
+  </div></header>
 
   <div class="wrap">
-    <div class="grid">
-      <section class="card"><div class="body">
-        <div class="row3">
-          <div>
-            <label>Status</label>
-            <input id="note" class="muted" disabled>
-          </div>
-          <div>
-            <label>EAN</label>
-            <input id="ean">
-          </div>
-          <div>
-            <label>Discogs token (valfritt)</label>
-            <input id="discogsToken" placeholder="Klistra in token här (sparas lokalt)">
-          </div>
-        </div>
-        <div class="row" style="grid-template-columns:1fr auto auto auto;align-items:end">
-          <div class="muted">Tips: Bra ljus, 15–25 cm, fyll bredden med strecken. Byt kamera om selfien startar. Använd Ficklampa/Zoom vid behov.</div>
-          <button id="btn-lookup" class="btn">Sök info</button>
-          <button id="btn-copy" class="btn">Kopiera EAN</button>
-          <button id="btn-still" class="btn" disabled>Stillbild‑scan</button>
-        </div>
-        <video id="video" muted playsinline></video>
-      </div></section>
-
-      <section class="card"><div class="body">
-        <h3 style="margin:0 0 8px">Metadata</h3>
-        <div class="row">
-          <div><label>Artist</label><input id="artist"></div>
-          <div><label>Album</label><input id="album"></div>
-        </div>
-        <div class="row">
-          <div><label>Format</label>
-            <select id="format"><option>LP</option><option>EP</option><option>Single</option><option>CD</option><option>Kassett</option></select>
-          </div>
-          <div><label>År</label><input id="ar" type="number" min="1900" max="2100"></div>
-        </div>
-        <div class="row">
-          <div><label>Genre/Kategori</label><input id="genre"></div>
-          <div><label>Thumbnail (URL)</label><input id="thumb"></div>
-        </div>
-        <div class="row">
-          <div><label>Inköpspris</label><input id="inkop" type="number" step="0.01"></div>
-          <div><label>Faktiskt försäljningspris</label><input id="salj" type="number" step="0.01"></div>
-        </div>
-        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" id="btn-save">Spara post</button>
-          <button class="btn" id="btn-new">Ny tom</button>
-        </div>
-      </div></section>
-
-      <section class="card"><div class="body">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <h3 style="margin:0">Register & Rapport</h3>
-          <div style="display:flex;gap:8px">
-            <button class="btn" id="btn-export-pdf">Exportera PDF</button>
-            <button class="btn" id="btn-export-csv">Exportera CSV</button>
-          </div>
-        </div>
-        <div class="summary">
-          <div class="pill"><div class="muted">Antal</div><div id="sum-antal" style="font-weight:600">0</div></div>
-          <div class="pill"><div class="muted">Medel dagar i lager</div><div id="sum-dagar" style="font-weight:600">0</div></div>
-          <div class="pill"><div class="muted">Sum inköp</div><div id="sum-inkop" style="font-weight:600">0</div></div>
-          <div class="pill"><div class="muted">Sum sålt</div><div id="sum-salj" style="font-weight:600">0</div></div>
-          <div class="pill"><div class="muted">Marginal</div><div id="sum-marg" style="font-weight:600">0</div></div>
-        </div>
-        <div style="overflow:auto">
-          <table id="tbl"><thead><tr>
-            <th>Bild</th><th>Artist</th><th>Album</th><th>År</th><th>Format</th><th>EAN</th><th class="right">Dagar</th><th class="right">Inköp</th><th class="right">Sålt</th><th class="right">Marginal</th><th class="right">Åtgärd</th>
-          </tr></thead><tbody></tbody></table>
-        </div>
-      </div></section>
+    <div class="row">
+      <label>EAN</label>
+      <input id="ean" style="flex:1" />
+      <button id="btn-copy" class="btn">Kopiera</button>
+      <span id="note" class="muted"></span>
     </div>
-  </div>
-
-  <!-- Bekräftelse-överlägg -->
-  <div class="overlay" id="overlay">
-    <div class="sheet">
-      <h3>Träff</h3>
-      <div class="flex">
-        <div class="thumb"><img id="ov-thumb" alt="thumb"></div>
-        <div>
-          <div class="muted">EAN</div>
-          <div id="ov-ean" style="font-weight:600"></div>
-          <div id="ov-meta" class="muted"></div>
-          <div id="ov-price" class="muted" style="margin-top:4px"></div>
-        </div>
-      </div>
-      <div class="actions">
-        <div class="left-actions">
-          <button class="btn" id="ov-rescan">Skanna igen</button>
-        </div>
-        <div>
-          <button class="btn" id="ov-apply-price" disabled>Använd pris</button>
-          <button class="btn" id="ov-save">Spara</button>
-        </div>
-      </div>
-    </div>
+    <video id=\"video\" muted playsinline></video>
+    <canvas id="snap" style="display:none"></canvas>
+    <div class="muted" style="margin-top:6px">Tips: Ge kameratillstånd. Om selfiekamera: <b>Byt kamera</b>. Svagt ljus: <b>Ficklampa</b>. Liten kod: <b>Zoom +</b>. Håll 15–25 cm och fyll skärmens bredd. Testa även <b>Stillbild‑scan</b>.</div>
   </div>
 
   <script>
-    // ===== Helpers / Storage =====
-    function $(q){return document.querySelector(q)}; function $$(q){return Array.prototype.slice.call(document.querySelectorAll(q))}
-    function setVal(id,v){ var el=$(id); if(el) el.value=v||''; }
-    var statusEl=$('#status'), noteEl=$('#note'); function badge(t){ statusEl.textContent=t; }
-    function num(n){ n=+n; return isFinite(n)? n:0; }
+    // === Helper (ES5 only) ===
+    function $(q){ return document.querySelector(q); }
+    function setText(el,t){ if(el) el.textContent=t; }
+    var statusEl=$('#status'), video=$('#video'), noteEl=$('#note'), snap=$('#snap');
+    var reader=null, curStream=null, devices=[], curIndex=0, haveTorch=false, curZoom=1, usingBD=false, detector=null, running=false, hit=false;
 
-    var tokenKey='discogs.token';
-    document.addEventListener('DOMContentLoaded', function(){ try{ var v=localStorage.getItem(tokenKey)||''; $('#discogsToken').value=v; }catch(e){} });
-    $('#discogsToken').addEventListener('input', function(){ try{ localStorage.setItem(tokenKey, this.value.trim()); }catch(e){} });
+    function log(msg){ setText(statusEl,msg); }
+    function stop(){ try{ if(reader){ if(reader.reset) reader.reset(); } }catch(e){}; reader=null; try{ if(curStream){ curStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}; curStream=null; running=false; hit=false; }
 
-    var storeKey='vinylregister.v1';
-    var db = (function(){ try{return JSON.parse(localStorage.getItem(storeKey)||'[]')}catch(e){return []} })();
-    function saveDB(){ try{ localStorage.setItem(storeKey, JSON.stringify(db)); }catch(e){}; render(); }
+    function applyZoom(delta){ try{ var track = curStream && curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('zoom' in caps)) return; curZoom=Math.max(caps.zoom.min||1, Math.min((caps.zoom.max||1),(curZoom+delta))); track.applyConstraints({advanced:[{zoom:curZoom}]}); }catch(e){} }
+    function toggleTorch(){ try{ var track=curStream && curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('torch' in caps)) return; haveTorch=!haveTorch; track.applyConstraints({advanced:[{torch:haveTorch}]}); $('#btn-torch').textContent = haveTorch?'Ficklampa: På':'Ficklampa'; }catch(e){} }
 
-    function daysSince(ts){ return Math.max(0, Math.floor((Date.now()- (ts||Date.now()))/86400000)); }
-
-    function toRow(r){
-      var m = num(r.salj) - num(r.inkop);
-      var tr=document.createElement('tr');
-      tr.innerHTML = '<td>'+(r.thumb?('<img src="'+r.thumb+'" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #1f2937">'):'')+'</td>'+
-        '<td>'+esc(r.artist)+'</td><td>'+esc(r.album)+'</td><td>'+esc(r.ar)+'</td><td>'+esc(r.format)+'</td><td>'+esc(r.ean)+'</td>'+
-        '<td class="right">'+daysSince(r.ts)+'</td>'+
-        '<td class="right">'+fmt(num(r.inkop))+'</td><td class="right">'+fmt(num(r.salj))+'</td><td class="right">'+fmt(m)+'</td>'+
-        '<td class="right"><button class="btn" data-edit="'+r.id+'">Redigera</button> <button class="btn" data-del="'+r.id+'">Radera</button></td>';
-      return tr;
-    }
-    function esc(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]}); }
-    function fmt(n){ return (n||n===0)? Number(n).toFixed(2):''; }
-
-    function getForm(){ return {
-      id: (crypto&&crypto.randomUUID? crypto.randomUUID(): String(Date.now())+Math.random().toString(16).slice(2)),
-      ts: Date.now(), ean: $('#ean').value.trim(), artist: $('#artist').value.trim(), album: $('#album').value.trim(), ar: $('#ar').value.trim(),
-      format: $('#format').value, genre: $('#genre').value.trim(), thumb: $('#thumb').value.trim(), inkop: num($('#inkop').value), salj: num($('#salj').value)
-    }; }
-    function setForm(o){ setVal('#ean', o.ean); setVal('#artist', o.artist); setVal('#album', o.album); setVal('#ar', o.ar); $('#format').value=o.format||'LP'; setVal('#genre', o.genre); setVal('#thumb', o.thumb); setVal('#inkop', o.inkop); setVal('#salj', o.salj); }
-
-    function render(){ var tbody=$('#tbl tbody'); tbody.innerHTML=''; db.forEach(function(r){ tbody.appendChild(toRow(r)); });
-      // summering
-      var antal=db.length, sumIn=0, sumUt=0, sumDays=0; db.forEach(function(r){ sumIn+=num(r.inkop); sumUt+=num(r.salj); sumDays+=daysSince(r.ts); });
-      $('#sum-antal').textContent=String(antal); $('#sum-inkop').textContent=fmt(sumIn); $('#sum-salj').textContent=fmt(sumUt); $('#sum-marg').textContent=fmt(sumUt-sumIn); $('#sum-dagar').textContent= antal? (sumDays/antal).toFixed(1):'0';
-      // händelser
-      $$('[data-edit]').forEach(function(b){ b.onclick=function(){ var r=db.find(function(x){return x.id===b.dataset.edit}); if(!r) return; setForm(r); $('#btn-save').onclick=function(){ var upd=getForm(); r.artist=upd.artist; r.album=upd.album; r.ar=upd.ar; r.format=upd.format; r.genre=upd.genre; r.ean=upd.ean; r.thumb=upd.thumb; r.inkop=upd.inkop; r.salj=upd.salj; saveDB(); $('#btn-save').onclick=saveNew; setForm({}); }; } });
-      $$('[data-del]').forEach(function(b){ b.onclick=function(){ if(confirm('Radera posten?')){ db=db.filter(function(x){return x.id!==b.dataset.del}); saveDB(); } }; });
-    }
-
-    function saveNew(){ var r=getForm(); if(!r.ean && !r.artist && !r.album){ alert('Minst EAN eller Artist/Album behövs.'); return; } db.unshift(r); saveDB(); flash('Sparat'); setForm({}); }
-    $('#btn-save').onclick=saveNew; $('#btn-new').onclick=function(){ setForm({}); };
-
-    // CSV + PDF
-    $('#btn-export-csv').onclick=function(){ var headers=['ean','artist','album','ar','format','genre','thumb','inkop','salj','marginal','dagar','ts']; var rows=[headers.join(';')]; db.forEach(function(r){ var m=(num(r.salj)-num(r.inkop)).toFixed(2); rows.push([r.ean,r.artist,r.album,r.ar,r.format,r.genre,r.thumb,fmt(r.inkop)||'0.00',fmt(r.salj)||'0.00',m,daysSince(r.ts),r.ts].map(csvEsc).join(';')); }); var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([rows.join('\n')],{type:'text/csv'})); a.download='vinylregister_'+new Date().toISOString().slice(0,10)+'.csv'; a.click(); };
-    function csvEsc(v){ v=String(v==null?'':v).replace(/"/g,'""'); return v.indexOf(';')>-1||v.indexOf('\n')>-1? '"'+v+'"' : v; }
-
-    $('#btn-export-pdf').onclick=function(){ ensurePDF(function(){ var doc=new window.jspdf.jsPDF({unit:'pt',format:'a4'}); doc.text('Vinylregister',40,40);
-      var headers=[["Bild","Artist","Album","År","Format","EAN","Dagar","Inköp","Sålt","Marginal"]];
-      var body=db.map(function(r){ return ['', r.artist||'', r.album||'', r.ar||'', r.format||'', r.ean||'', String(daysSince(r.ts)), fmt(r.inkop)||'0.00', fmt(r.salj)||'0.00', (num(r.salj)-num(r.inkop)).toFixed(2)]; });
-      doc.autoTable({head:headers, body:body, startY:60, styles:{fontSize:8}});
-      doc.save('vinylregister_'+new Date().toISOString().slice(0,10)+'.pdf'); }); };
-
-    function ensurePDF(cb){ if(window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.prototype.autoTable){ cb(); return; }
-      loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', function(){ loadScript('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js', cb, function(){ flash('Kunde inte ladda pdf-plugin'); }); }, function(){ flash('Kunde inte ladda jsPDF'); }); }
-
-    // ===== Metadata lookup (MusicBrainz + Discogs pris) =====
-    function digitsOnly(s){ return (s||'').replace(/\D/g,''); }
-    function mapFormat(formats){ var f=(formats||[]).map(function(x){return String(x).toLowerCase()}); function has(s){return f.some(function(x){return x.indexOf(s)>-1})}
-      if(has('lp')||has('vinyl')||has('12')) return 'LP'; if(has('7"')||has('single')) return 'Single'; if(has('ep'))return 'EP'; if(has('cd'))return 'CD'; if(has('cassette')||has('kassett'))return 'Kassett'; return ''; }
-
-    function fetchMusicBrainz(ean){ ean=digitsOnly(ean); if(!ean) return Promise.reject('noean');
-      return fetch('https://musicbrainz.org/ws/2/release/?query=barcode:'+encodeURIComponent(ean)+'&fmt=json&limit=5',{headers:{'Accept':'application/json'}})
-        .then(function(r){ if(!r.ok) throw new Error('MB '+r.status); return r.json(); })
-        .then(function(js){ var rel=js.releases&&js.releases[0]; if(!rel) throw new Error('MB tomt'); var artist=(rel['artist-credit']||[]).map(function(a){return a.name || (a.artist&&a.artist.name)||''}).filter(Boolean).join(', ');
-          return {source:'MB', artist:artist, album:rel.title||'', ar:(rel.date||'').slice(0,4), format:String((rel.media&&rel.media[0]&&rel.media[0].format)||'').toUpperCase().replace('VINYL','LP').replace('COMPACT DISC','CD'), thumb:'https://coverartarchive.org/release/'+rel.id+'/front-500', url:'https://musicbrainz.org/release/'+rel.id}; }); }
-
-    function fetchDiscogs(ean, token){ ean=digitsOnly(ean); if(!ean||!token) return Promise.reject('notoken');
-      var url='https://api.discogs.com/database/search?barcode='+encodeURIComponent(ean)+'&type=release&per_page=5';
-      return fetch(url,{headers:{'Authorization':'Discogs token='+token}}).then(function(res){ if(!res.ok) throw new Error('Discogs '+res.status); return res.json(); })
-        .then(function(js){ if(!js.results||!js.results.length) throw new Error('Discogs tomt'); var first=js.results[0]; var meta={source:'Discogs', artist:(first.artist||'').replace(/\s\(\d+\)$/,'').trim(), album:first.title||'', ar:String(first.year||''), format:mapFormat(first.format||[]), genre:(first.genre||[]).join(', '), thumb:first.cover_image||'', url:first.uri||'', resource:first.resource_url||''};
-          if(meta.resource){ return fetch(meta.resource,{headers:{'Authorization':'Discogs token='+token}}).then(function(r){ if(!r.ok) return meta; return r.json(); }).then(function(d){ if(d){ meta.thumb=(d.images&&d.images[0]&&d.images[0].uri)||meta.thumb; meta.lowest= d.lowest_price!=null? Number(d.lowest_price): null; meta.forSale = d.num_for_sale!=null? Number(d.num_for_sale): null; } return meta; }); }
-          return meta; }); }
-
-    function applyMeta(m){ if(!m) return; if(m.artist && !$('#artist').value) $('#artist').value=m.artist; if(m.album && !$('#album').value) $('#album').value=m.album; if(m.ar && !$('#ar').value) $('#ar').value=m.ar; if(m.format && !$('#format').value) $('#format').value=m.format; if(m.thumb && !$('#thumb').value) $('#thumb').value=m.thumb; }
-
-    $('#btn-lookup').onclick=function(){ var e=$('#ean').value; noteEl.value='Söker metadata…'; fetchMusicBrainz(e).then(function(m){ applyMeta(m); noteEl.value='Träff från MusicBrainz'; }).catch(function(){ noteEl.value='Ingen MB-träff'; }); var t=($('#discogsToken').value||'').trim(); if(t){ fetchDiscogs(e,t).then(function(d){ if(d.lowest!=null){ $('#ov-price').textContent='Discogs lägsta: '+d.lowest+' (antal till salu: '+(d.forSale||0)+')'; $('#ov-apply-price').disabled=false; $('#ov-apply-price').onclick=function(){ $('#salj').value=String(d.lowest); }; } if(d.thumb && !$('#thumb').value){ $('#thumb').value=d.thumb; } }).catch(function(){ /* ignore */ }); } };
-
-    // ===== Kamera + Skanner (BD → ZXing) =====
-    var video=$('#video'); var curStream=null, devices=[], curIndex=0, haveTorch=false, curZoom=1, reader=null, usingBD=false, detector=null, running=false, hit=false;
-
-    function stopCam(){ try{ if(reader&&reader.reset) reader.reset(); }catch(e){}; reader=null; try{ if(curStream){ curStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}; curStream=null; running=false; }
-    function applyZoom(delta){ try{ var track=curStream&&curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('zoom' in caps)) return; curZoom=Math.max(caps.zoom.min||1, Math.min((caps.zoom.max||1),(curZoom+delta))); track.applyConstraints({advanced:[{zoom:curZoom}]}); }catch(e){} }
-    function toggleTorch(){ try{ var track=curStream&&curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('torch' in caps)) return; haveTorch=!haveTorch; track.applyConstraints({advanced:[{torch:haveTorch}]}); $('#btn-torch').textContent = haveTorch?'Ficklampa: På':'Ficklampa'; }catch(e){} }
     function listCams(){ return navigator.mediaDevices.enumerateDevices().then(function(all){ devices=all.filter(function(d){ return d.kind==='videoinput'; }); $('#btn-swap').disabled = devices.length<2; }); }
 
     function startWithDevice(deviceId){
-      stopCam(); badge('Init kamera…');
+      stop(); log('Init kamera...');
       var constraints={ video: deviceId? {deviceId:{exact:deviceId}} : {facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30}}, audio:false };
-      return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){ video.srcObject=stream; curStream=stream; return video.play(); }).then(function(){ var track=curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(track&&track.getCapabilities){ var caps=track.getCapabilities(); $('#btn-zoom-in').disabled=!(caps.zoom); $('#btn-zoom-out').disabled=!(caps.zoom); $('#btn-torch').disabled=!(caps.torch); } else { $('#btn-zoom-in').disabled=true; $('#btn-zoom-out').disabled=true; $('#btn-torch').disabled=true; } return listCams(); })
-      .then(function(){ badge('Kamera igång'); startScannerAuto(); }).catch(function(e){ badge('Kamerafel: '+(e&&e.name||e)); }); }
-
-    function startScannerAuto(){ hit=false; if('BarcodeDetector' in window){ usingBD=true; startBD(); } else { usingBD=false; ensureZXing(startZXing); } }
-
-    function startBD(){ try{ detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); running=true; loopBD(); noteEl.value='(Inbyggd skanner)'; }catch(e){ usingBD=false; ensureZXing(startZXing); } }
-    function loopBD(){ if(!running||hit) return; if(video.readyState>=2){ detector.detect(video).then(function(res){ if(res&&res.length){ var code=res[0].rawValue||res[0].raw||''; if(code){ onHit(code); return; } } setTimeout(loopBD,60); }).catch(function(){ setTimeout(loopBD,120); }); } else { setTimeout(loopBD,120); } }
-
-    function loadScript(src, ok, err){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=err||function(){}; document.head.appendChild(s); }
-    function ensureZXing(cb){ if(window.ZXing&&window.ZXing.BrowserMultiFormatReader){ cb(); return; } noteEl.value='Laddar ZXing…'; var urls=['https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js','https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js']; var i=0; (function next(){ if(i>=urls.length){ noteEl.value='Kunde inte ladda ZXing (blockerat?)'; return;} loadScript(urls[i], function(){ noteEl.value='(ZXing)'; cb(); }, function(){ i++; next(); }); })(); }
-    function startZXing(){ if(!window.ZXing||!window.ZXing.BrowserMultiFormatReader){ noteEl.value='ZXing saknas'; return;} badge('Startar ZXing…'); try{ var ZX=window.ZXing; reader=new ZX.BrowserMultiFormatReader(); if(reader.decodeFromVideoElementContinuously){ reader.decodeFromVideoElementContinuously(video, function(result, err){ if(result && !hit){ onHit(result.getText()); } }); } else { (function loop(){ if(hit) return; reader.decodeFromVideoElement(video).then(function(res){ onHit(res.getText()); }).catch(function(){ setTimeout(loop,120); }); })(); } }catch(e){ noteEl.value='ZXing-fel: '+e; } }
-
-    // ===== Träff → överlägg + metadata/price + spara =====
-    function onHit(code){ if(!code) return; hit=true; $('#ean').value=code; badge('Kod: '+code); try{ navigator.vibrate && navigator.vibrate(40);}catch(e){}
-      $('#overlay').classList.add('show'); $('#ov-ean').textContent=code; $('#ov-meta').textContent='Hämtar info…'; $('#ov-thumb').src=''; $('#ov-price').textContent=''; $('#ov-apply-price').disabled=true;
-      // först MB för grundmetadata
-      fetchMusicBrainz(code).then(function(m){ applyMeta(m); $('#ov-meta').textContent=[m.artist||'', m.album||'', m.ar||''].filter(Boolean).join(' • '); if(m.thumb){ $('#ov-thumb').src=m.thumb; } }).catch(function(){ $('#ov-meta').textContent='Ingen metadata hittad (du kan fylla själv)'; });
-      // sedan Discogspris om token finns
-      var t=($('#discogsToken').value||'').trim(); if(t){ fetchDiscogs(code,t).then(function(d){ if(d.lowest!=null){ $('#ov-price').textContent='Discogs lägsta: '+d.lowest+' (till salu: '+(d.forSale||0)+')'; $('#ov-apply-price').disabled=false; $('#ov-apply-price').onclick=function(){ $('#salj').value=String(d.lowest); }; } if(d.thumb && !$('#ov-thumb').src){ $('#ov-thumb').src=d.thumb; } }).catch(function(){ /* ignore */ }); }
+      return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){ video.srcObject=stream; curStream=stream; return video.play(); }).then(function(){
+        var track=curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(track && track.getCapabilities){ var caps=track.getCapabilities(); $('#btn-zoom-in').disabled=!(caps.zoom); $('#btn-zoom-out').disabled=!(caps.zoom); $('#btn-torch').disabled=!(caps.torch); } else { $('#btn-zoom-in').disabled=true; $('#btn-zoom-out').disabled=true; $('#btn-torch').disabled=true; }
+        $('#btn-still').disabled=false; return listCams();
+      }).then(function(){ log('Kamera igång'); startScannerAuto(); }).catch(function(e){ log('Kamerafel: '+(e&&e.name||e)); });
     }
 
-    $('#ov-rescan').onclick=function(){ $('#overlay').classList.remove('show'); startScannerAuto(); };
-    $('#ov-save').onclick=function(){ $('#overlay').classList.remove('show'); saveNew(); };
+    // === AUTO: använd BarcodeDetector om den finns, annars ZXing ===
+    function startScannerAuto(){ if('BarcodeDetector' in window){ usingBD=true; startBD(); } else { usingBD=false; ensureZXing(startZXing); } }
 
-    function start(){ navigator.mediaDevices.getUserMedia({video:true,audio:false}).then(function(tmp){ tmp.getTracks().forEach(function(t){ t.stop(); }); return listCams(); }).then(function(){ var backIdx=0; for(var i=0;i<devices.length;i++){ if(/back|rear|environment/i.test(devices[i].label)){ backIdx=i; break; } } curIndex=Math.min(backIdx, Math.max(0, devices.length-1)); $('#btn-swap').disabled = devices.length<2; return startWithDevice(devices[curIndex] && devices[curIndex].deviceId); }).catch(function(){ return startWithDevice(null); }); }
+    // === BarcodeDetector (inbyggd) ===
+    function startBD(){ try{ detector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); running=true; loopBD(); noteEl.textContent='(Inbyggd skanner)'; }catch(e){ usingBD=false; ensureZXing(startZXing); } }
+    function loopBD(){ if(!running||hit) return; if(video.readyState>=2){ detector.detect(video).then(function(res){ if(res&&res.length){ var code=res[0].rawValue||res[0].raw||''; if(code){ onHit(code); return; } } setTimeout(loopBD,60); }).catch(function(){ setTimeout(loopBD,120); }); } else { setTimeout(loopBD,120); } }
 
-    $('#btn-start').onclick=start; $('#btn-swap').onclick=function(){ if(!devices.length) return; curIndex=(curIndex+1)%devices.length; startWithDevice(devices[curIndex] && devices[curIndex].deviceId); };
-    $('#btn-torch').onclick=toggleTorch; $('#btn-zoom-in').onclick=function(){ applyZoom(0.25); }; $('#btn-zoom-out').onclick=function(){ applyZoom(-0.25); };
-    $('#btn-copy').onclick=function(){ try{ navigator.clipboard.writeText($('#ean').value||''); badge('EAN kopierad'); }catch(e){} };
+    // === ZXing loader (multi-CDN fallback) ===
+    function loadScript(src, onload, onerror){ var s=document.createElement('script'); s.src=src; s.onload=onload; s.onerror=onerror||function(){}; document.head.appendChild(s); }
+    function ensureZXing(cb){ if(window.ZXing && window.ZXing.BrowserMultiFormatReader){ cb(); return; }
+      noteEl.textContent='Laddar ZXing…';
+      var urls=[
+        'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js',
+        'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'
+      ];
+      var i=0; (function tryNext(){ if(i>=urls.length){ noteEl.textContent='Kunde inte ladda ZXing (blockerat?). Prova inkognito eller stäng av adblock/VPN.'; return; }
+        loadScript(urls[i], function(){ noteEl.textContent=''; cb(); }, function(){ i++; tryNext(); });
+      })();
+    }
 
-    // Nytt vid start: auto-render
-    render();
+    // === ZXing (utan setHints-beroende) ===
+    function startZXing(){ if(!window.ZXing||!window.ZXing.BrowserMultiFormatReader){ noteEl.textContent='ZXing saknas'; return; } log('Startar ZXing…');
+      try{
+        var ZX=window.ZXing, hints=null; try{ if(window.Map && ZX.DecodeHintType && ZX.BarcodeFormat){ hints=new Map(); hints.set(ZX.DecodeHintType.POSSIBLE_FORMATS,[ZX.BarcodeFormat.EAN_13,ZX.BarcodeFormat.EAN_8,ZX.BarcodeFormat.UPC_A,ZX.BarcodeFormat.UPC_E]); hints.set(ZX.DecodeHintType.TRY_HARDER,true); } }catch(e){}
+        try{ reader = hints ? new ZX.BrowserMultiFormatReader(hints) : new ZX.BrowserMultiFormatReader(); } catch(e){ reader = new ZX.BrowserMultiFormatReader(); }
+        if(reader.decodeFromVideoElementContinuously){ reader.decodeFromVideoElementContinuously(video, function(result, err){ if(result){ onHit(result.getText()); } }); }
+        else { (function loop(){ reader.decodeFromVideoElement(video).then(function(res){ onHit(res.getText()); }).catch(function(){ setTimeout(loop, 120); }); })(); }
+        noteEl.textContent='(ZXing)';
+      }catch(e){ noteEl.textContent='ZXing-fel: '+e; }
+    }
+
+    // === Stillbild‑scan: funkar med BD eller ZXing ===
+    function stillScan(){ if(!curStream){ return; } var w=video.videoWidth||1280, h=video.videoHeight||720; snap.width=w; snap.height=h; var ctx=snap.getContext('2d'); ctx.drawImage(video,0,0,w,h);
+      if(usingBD && detector){ detector.detect(snap).then(function(res){ if(res&&res.length){ onHit(res[0].rawValue||res[0].raw||''); } else { flashMsg('Ingen kod på stillbild. Prova zoom + ljus.'); } }).catch(function(){ flashMsg('Fel vid BD‑stillbild.'); }); return; }
+      if(window.ZXing && reader && reader.decodeFromImage){ try{ var img=new Image(); img.onload=function(){ reader.decodeFromImage(img).then(function(r){ onHit(r.getText()); }).catch(function(){ flashMsg('Ingen kod på stillbild.'); }); }; img.src=snap.toDataURL('image/png'); }catch(e){ flashMsg('ZXing saknar stillbild‑decode.'); }
+      } else { flashMsg('Stöds inte i detta läge.'); }
+    }
+
+    function flashMsg(m){ noteEl.textContent=m; setTimeout(function(){ if(noteEl.textContent===m) noteEl.textContent=''; }, 1600); }
+
+    function onHit(code){ if(!code) return; hit=true; $('#ean').value=code; log('Kod: '+code); try{ navigator.vibrate && navigator.vibrate(40); }catch(e){} stop(); }
+
+    function start(){ navigator.mediaDevices.getUserMedia({video:true,audio:false}).then(function(tmp){ tmp.getTracks().forEach(function(t){ t.stop(); }); return listCams(); }).then(function(){ var backIdx=0; for(var i=0;i<devices.length;i++){ if(/back|rear|environment/i.test(devices[i].label)){ backIdx=i; break; } } curIndex = Math.min(backIdx, Math.max(0, devices.length-1)); $('#btn-swap').disabled = devices.length<2; return startWithDevice(devices[curIndex] && devices[curIndex].deviceId); }).catch(function(){ return startWithDevice(null); }); }
+
+    $('#btn-start').onclick=start;
+    $('#btn-swap').onclick=function(){ if(!devices.length) return; curIndex=(curIndex+1)%devices.length; startWithDevice(devices[curIndex] && devices[curIndex].deviceId); };
+    $('#btn-torch').onclick=toggleTorch;
+    $('#btn-zoom-in').onclick=function(){ applyZoom(0.25); };
+    $('#btn-zoom-out').onclick=function(){ applyZoom(-0.25); };
+    $('#btn-still').onclick=stillScan;
+    $('#btn-copy').onclick=function(){ try{ navigator.clipboard.writeText($('#ean').value||''); log('EAN kopierad'); }catch(e){} };
+
+    // === Vy-justering (contain/cover + center/vänster) ===
+    var fitModes=[{fit:'contain',pos:'center center',label:'Vy: Center'},{fit:'cover',pos:'center center',label:'Vy: Fyll'},{fit:'cover',pos:'left center',label:'Vy: Vänster'}];
+    var fitIndex=parseInt(localStorage.getItem('vinyl.fitIndex')||'0',10)||0;
+    function applyFit(){ var m=fitModes[fitIndex]; video.style.objectFit=m.fit; video.style.objectPosition=m.pos; var b=$('#btn-fit'); if(b) b.textContent=m.label; }
+    var fitBtn=$('#btn-fit'); if(fitBtn){ fitBtn.onclick=function(){ fitIndex=(fitIndex+1)%fitModes.length; applyFit(); try{ localStorage.setItem('vinyl.fitIndex', String(fitIndex)); }catch(e){} }; }
+    applyFit();
   </script>
 </body>
 </html>
