@@ -3,129 +3,220 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vinylregister – Android skanner (BD + ZXing + Stillbild)</title>
+  <title>Vinylregister – Android (Skanna → Metadata → Autospara)</title>
   <meta http-equiv="Cache-Control" content="no-store" />
   <style>
-    body{margin:0;background:#0b1220;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
-    header{position:sticky;top:0;background:#0c1424;border-bottom:1px solid #1f2937}
-    .bar{max-width:1000px;margin:auto;padding:10px;display:flex;gap:10px;align-items:center;justify-content:space-between}
+    :root{--bg:#0b1220;--ring:#1f2937;--muted:#94a3b8;--text:#e5e7eb}
+    *{box-sizing:border-box}
+    html,body{margin:0;background:#0b1220;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    header{position:sticky;top:0;z-index:10;background:#0c1424;border-bottom:1px solid var(--ring)}
+    .bar{max-width:1100px;margin:auto;padding:10px;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}
+    .brand{display:flex;gap:10px;align-items:center}
+    .logo{width:28px;height:28px;border-radius:8px;background:conic-gradient(from 210deg at 50% 50%,#60a5fa,#34d399,#a78bfa,#60a5fa)}
+    .toolbar{display:flex;flex-wrap:wrap;gap:8px}
     .btn{background:#0b1424;border:1px solid #1e293b;color:#dbeafe;border-radius:10px;padding:8px 12px;cursor:pointer}
     .btn:disabled{opacity:.5;cursor:not-allowed}
-    .muted{color:#94a3b8}
-    video{width:100%;max-height:68vh;background:#000;border-radius:12px}
-    .wrap{max-width:1000px;margin:12px auto;padding:12px}
-    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    select,input{background:#0b1424;color:#e5e7eb;border:1px solid #233041;border-radius:8px;padding:8px}
+    .wrap{max-width:1100px;margin:12px auto;padding:12px}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    .card{background:#0e1626;border:1px solid var(--ring);border-radius:14px}
+    .card .body{padding:12px}
+    label{display:block;font-size:12px;color:#9ca3af;margin:6px 0 4px}
+    input,select,textarea{width:100%;background:#0b1424;border:1px solid #233041;color:var(--text);padding:8px 10px;border-radius:10px}
+    textarea{min-height:64px;resize:vertical}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #1f2937;padding:8px;text-align:left}
+    th{font-size:12px;color:#93a3b8}
+    .right{display:flex;gap:6px;justify-content:flex-end}
+    video{width:100%;max-height:64vh;background:#000;border-radius:12px}
+    .muted{color:var(--muted)}
     .tag{font-size:12px;border:1px solid #223049;background:#0a1524;border-radius:999px;padding:6px 8px;color:#cbd5e1}
   </style>
 </head>
 <body>
-  <header><div class="bar">
-    <strong>Vinylregister – Android skanner</strong>
-    <div class="row">
-      <button id="btn-start" class="btn">Starta skanning</button>
-      <button id="btn-swap" class="btn" disabled>Byt kamera</button>
-      <button id="btn-torch" class="btn" disabled>Ficklampa</button>
-      <button id="btn-zoom-in" class="btn" disabled>Zoom +</button>
-      <button id="btn-zoom-out" class="btn" disabled>Zoom −</button>
-      <button id="btn-still" class="btn" disabled>Stillbild‑scan</button>
-      <span id="status" class="tag">Init</span>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <div style="font-weight:600">Vinylregister</div>
+          <div class="muted" style="font-size:12px">Android: Skanna → Metadata → Autospara</div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button id="btn-start" class="btn">Starta skanning</button>
+        <button id="btn-swap" class="btn" disabled>Byt kamera</button>
+        <button id="btn-torch" class="btn" disabled>Ficklampa</button>
+        <button id="btn-zoom-in" class="btn" disabled>Zoom +</button>
+        <button id="btn-zoom-out" class="btn" disabled>Zoom −</button>
+        <span id="status" class="tag">Init</span>
+      </div>
     </div>
-  </div></header>
+  </header>
 
   <div class="wrap">
-    <div class="row">
-      <label>EAN</label>
-      <input id="ean" style="flex:1" />
-      <button id="btn-copy" class="btn">Kopiera</button>
-      <span id="note" class="muted"></span>
+    <div class="grid">
+      <section class="card"><div class="body">
+        <div class="row">
+          <div>
+            <label>Discogs token (valfritt)</label>
+            <input id="discogsToken" placeholder="Klistra in token här (sparas lokalt)">
+          </div>
+          <div>
+            <label>Status</label>
+            <input id="note" class="muted" disabled>
+          </div>
+        </div>
+        <video id="video" muted playsinline></video>
+        <div class="muted" style="margin-top:6px">Tips: Bra ljus, 15–25 cm, fyll bredden med strecken. Byt kamera om selfien startar. Använd Ficklampa/Zoom vid behov.</div>
+      </div></section>
+
+      <section class="card"><div class="body">
+        <h3 style="margin:0 0 8px">Ny post (fylls automatiskt vid skanning)</h3>
+        <div class="row">
+          <div><label>Artist</label><input id="artist"></div>
+          <div><label>Album</label><input id="album"></div>
+        </div>
+        <div class="row">
+          <div><label>Format</label>
+            <select id="format"><option>LP</option><option>EP</option><option>Single</option><option>CD</option><option>Kassett</option></select>
+          </div>
+          <div><label>År</label><input id="ar" type="number" min="1900" max="2100"></div>
+        </div>
+        <div class="row">
+          <div><label>Genre/Kategori</label><input id="genre"></div>
+          <div><label>EAN</label><input id="ean"></div>
+        </div>
+        <div class="row">
+          <div><label>Thumbnail (URL)</label><input id="thumb"></div>
+          <div><label>Pris</label><input id="forsalj" type="number" step="0.01"></div>
+        </div>
+        <label>Kommentar</label>
+        <textarea id="kommentar"></textarea>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="btn-lookup">Sök info</button>
+          <button class="btn" id="btn-save">Spara</button>
+          <button class="btn" id="btn-new">Ny tom</button>
+          <button class="btn" id="btn-export">Exportera CSV</button>
+          <button class="btn" id="btn-import">Importera CSV</button>
+          <button class="btn" id="btn-reset">Rensa alla</button>
+          <button class="btn" id="btn-open-discogs" disabled>Öppna i Discogs</button>
+        </div>
+      </div></section>
+
+      <section class="card"><div class="body">
+        <h3 style="margin:0 0 8px">Register</h3>
+        <div class="row" style="grid-template-columns:1fr 1fr">
+          <input id="search" placeholder="Sök…">
+          <select id="filter-tag"><option value="">Alla etiketter</option><option>Nyinkommet</option><option>Ja tack</option><option>REA</option></select>
+        </div>
+        <div style="overflow:auto;margin-top:8px">
+          <table id="tbl"><thead><tr>
+            <th>Bild</th><th>Artist</th><th>Album</th><th>Format</th><th>År</th><th>Genre</th><th>EAN</th><th class="right">Pris</th><th class="right">Åtgärd</th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+      </div></section>
     </div>
-    <video id="video" muted playsinline></video>
-    <canvas id="snap" style="display:none"></canvas>
-    <div class="muted" style="margin-top:6px">Tips: Ge kameratillstånd. Om selfiekamera: <b>Byt kamera</b>. Svagt ljus: <b>Ficklampa</b>. Liten kod: <b>Zoom +</b>. Håll 15–25 cm och fyll skärmens bredd. Testa även <b>Stillbild‑scan</b>.</div>
   </div>
 
   <script>
-    // === Helper (ES5 only) ===
-    function $(q){ return document.querySelector(q); }
-    function setText(el,t){ if(el) el.textContent=t; }
-    var statusEl=$('#status'), video=$('#video'), noteEl=$('#note'), snap=$('#snap');
-    var reader=null, curStream=null, devices=[], curIndex=0, haveTorch=false, curZoom=1, usingBD=false, detector=null, running=false, hit=false;
+    // ===== Helpers / Storage =====
+    function $(q){return document.querySelector(q)}; function setText(el,t){ if(el) el.value=t; }
+    var statusEl=document.getElementById('status'); var noteEl=document.getElementById('note');
+    function badge(t){ statusEl.textContent=t; }
+    var tokenKey='discogs.token'; var storeKey='vinylregister.v1';
+    document.addEventListener('DOMContentLoaded', function(){ try{ var v=localStorage.getItem(tokenKey)||''; document.getElementById('discogsToken').value=v; }catch(e){} });
+    document.getElementById('discogsToken').addEventListener('input', function(){ try{ localStorage.setItem(tokenKey, this.value.trim()); }catch(e){} });
 
-    function log(msg){ setText(statusEl,msg); }
-    function stop(){ try{ if(reader){ if(reader.reset) reader.reset(); } }catch(e){}; reader=null; try{ if(curStream){ curStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}; curStream=null; running=false; hit=false; }
+    var data=(function(){ try{return JSON.parse(localStorage.getItem(storeKey)||'[]')}catch(e){return []} })();
+    function saveStore(){ try{ localStorage.setItem(storeKey, JSON.stringify(data)); }catch(e){}; render(); }
+    function getForm(){ return {
+      artist: $('#artist').value.trim(), album: $('#album').value.trim(), format: $('#format').value, ar: $('#ar').value.trim(),
+      genre: $('#genre').value.trim(), ean: $('#ean').value.trim(), thumb: $('#thumb').value.trim(), forsalj:+($('#forsalj').value||0), kommentar: $('#kommentar').value.trim(),
+      id: (crypto&&crypto.randomUUID? crypto.randomUUID(): String(Date.now())+Math.random().toString(16).slice(2)), ts: Date.now(), tag:''
+    }; }
+    function setForm(o){ o=o||{}; $('#artist').value=o.artist||''; $('#album').value=o.album||''; $('#format').value=o.format||'LP'; $('#ar').value=o.ar||''; $('#genre').value=o.genre||''; $('#ean').value=o.ean||''; $('#thumb').value=o.thumb||''; $('#forsalj').value=o.forsalj||''; $('#kommentar').value=o.kommentar||''; }
 
-    function applyZoom(delta){ try{ var track = curStream && curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('zoom' in caps)) return; curZoom=Math.max(caps.zoom.min||1, Math.min((caps.zoom.max||1),(curZoom+delta))); track.applyConstraints({advanced:[{zoom:curZoom}]}); }catch(e){} }
-    function toggleTorch(){ try{ var track=curStream && curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('torch' in caps)) return; haveTorch=!haveTorch; track.applyConstraints({advanced:[{torch:haveTorch}]}); $('#btn-torch').textContent = haveTorch?'Ficklampa: På':'Ficklampa'; }catch(e){} }
-
-    function listCams(){ return navigator.mediaDevices.enumerateDevices().then(function(all){ devices=all.filter(function(d){ return d.kind==='videoinput'; }); $('#btn-swap').disabled = devices.length<2; }); }
-
-    function startWithDevice(deviceId){
-      stop(); log('Init kamera...');
-      var constraints={ video: deviceId? {deviceId:{exact:deviceId}} : {facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30}}, audio:false };
-      return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){ video.srcObject=stream; curStream=stream; return video.play(); }).then(function(){
-        var track=curStream.getVideoTracks && curStream.getVideoTracks()[0]; if(track && track.getCapabilities){ var caps=track.getCapabilities(); $('#btn-zoom-in').disabled=!(caps.zoom); $('#btn-zoom-out').disabled=!(caps.zoom); $('#btn-torch').disabled=!(caps.torch); } else { $('#btn-zoom-in').disabled=true; $('#btn-zoom-out').disabled=true; $('#btn-torch').disabled=true; }
-        $('#btn-still').disabled=false; return listCams();
-      }).then(function(){ log('Kamera igång'); startScannerAuto(); }).catch(function(e){ log('Kamerafel: '+(e&&e.name||e)); });
+    function render(){ var q=$('#search').value.trim().toLowerCase(); var tbody=$('#tbl tbody'); tbody.innerHTML='';
+      data.filter(function(r){ var hay=[r.artist,r.album,r.genre,r.ean].join(' ').toLowerCase(); return q? hay.indexOf(q)>-1 : true; })
+        .forEach(function(r){ var tr=document.createElement('tr'); tr.innerHTML=
+          '<td>'+(r.thumb?('<img src="'+r.thumb+'" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #1f2937">'):'')+'</td>'+
+          '<td>'+escapeHtml(r.artist||'')+'</td><td>'+escapeHtml(r.album||'')+'</td><td>'+escapeHtml(r.format||'')+'</td><td>'+escapeHtml(r.ar||'')+'</td>'+
+          '<td>'+escapeHtml(r.genre||'')+'</td><td>'+escapeHtml(r.ean||'')+'</td>'+
+          '<td class="right">'+(r.forsalj? Number(r.forsalj).toFixed(2):'')+'</td>'+
+          '<td class="right"><button class="btn" data-edit="'+r.id+'">Redigera</button><button class="btn" data-del="'+r.id+'">Radera</button></td>';
+          tbody.appendChild(tr); });
+      $$('[data-edit]').forEach(function(b){ b.onclick=function(){ var r=data.find(function(x){return x.id===b.dataset.edit}); if(!r) return; setForm(r); document.getElementById('btn-save').onclick=function(){ var upd=getForm(); r.artist=upd.artist;r.album=upd.album;r.format=upd.format;r.ar=upd.ar;r.genre=upd.genre;r.ean=upd.ean;r.thumb=upd.thumb;r.forsalj=upd.forsalj;r.kommentar=upd.kommentar; saveStore(); document.getElementById('btn-save').onclick=saveNew; setForm({}); }; }; });
+      $$('[data-del]').forEach(function(b){ b.onclick=function(){ if(confirm('Radera posten?')){ data=data.filter(function(x){return x.id!==b.dataset.del}); saveStore(); } }; });
     }
+    function $$(q){ return Array.prototype.slice.call(document.querySelectorAll(q)); }
+    function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]}); }
 
-    // === AUTO: använd BarcodeDetector om den finns, annars ZXing ===
+    function saveNew(){ var r=getForm(); if(!r.artist && !r.album){ alert('Minst Artist eller Album behövs.'); return; } data.unshift(r); saveStore(); flash('Sparat'); setForm({}); }
+    document.getElementById('btn-save').onclick=saveNew; document.getElementById('btn-new').onclick=function(){ setForm({}); };
+    document.getElementById('btn-reset').onclick=function(){ if(confirm('Rensa alla poster?')){ data=[]; saveStore(); }};
+
+    // CSV import/export
+    document.getElementById('btn-export').onclick=function(){ var headers=['artist','album','format','ar','genre','ean','thumb','forsalj','kommentar','tag','ts']; var lines=[headers.join(';')]; data.forEach(function(r){ lines.push(headers.map(function(h){ return csvEsc(r[h]!=null?r[h]:''); }).join(';')); }); var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'})); a.download='vinylregister_'+new Date().toISOString().slice(0,10)+'.csv'; a.click(); };
+    document.getElementById('btn-import').onclick=function(){ var inp=document.createElement('input'); inp.type='file'; inp.accept='.csv,text/csv'; inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f) return; f.text().then(function(text){
+      text=(text||'').replace(/\r/g,''); var rows=text.split('\n').filter(function(x){return x}); var head=rows.shift(); if(!head) return; var headers=head.split(';').map(function(h){return h.trim()}); rows.forEach(function(line){ var cols=parseSemi(line); var r={}; headers.forEach(function(h,i){ r[h]=cols[i]||''; }); r.id=(crypto&&crypto.randomUUID? crypto.randomUUID(): String(Date.now())+Math.random().toString(16).slice(2)); data.push(r); }); saveStore(); }); }; inp.click(); };
+    function csvEsc(v){ if(typeof v==='number') return String(v); var s=String(v).replace(/"/g,'""'); return (s.indexOf(';')>-1||s.indexOf('\n')>-1)? '"'+s+'"' : s; }
+    function parseSemi(line){ var out=[],cur='',q=false; for(var i=0;i<line.length;i++){ var ch=line[i]; if(ch==='"'){ if(q && line[i+1]==='"'){cur+='"'; i++;} else q=!q; } else if(ch===';'&&!q){ out.push(cur); cur=''; } else cur+=ch; } out.push(cur); return out; }
+
+    // ===== Metadata lookup =====
+    var lastMeta=null; function digitsOnly(s){ return (s||'').replace(/\D/g,''); }
+    function mapFormat(formats){ var f=(formats||[]).map(function(x){return String(x).toLowerCase()}); function has(s){return f.some(function(x){return x.indexOf(s)>-1})}
+      if(has('lp')||has('vinyl')||has('12')) return 'LP'; if(has('7"')||has('single')) return 'Single'; if(has('ep'))return 'EP'; if(has('cd'))return 'CD'; if(has('cassette')||has('kassett'))return 'Kassett'; return ''; }
+    function applyMeta(meta){ if(!meta) return; if(meta.artist && !$('#artist').value) $('#artist').value=meta.artist; if(meta.album && !$('#album').value) $('#album').value=meta.album; if(meta.ar && !$('#ar').value) $('#ar').value=meta.ar; if(meta.format && !$('#format').value) $('#format').value=meta.format; if(meta.genre && !$('#genre').value) $('#genre').value=meta.genre; if(meta.thumb && !$('#thumb').value) $('#thumb').value=meta.thumb; }
+    function updateDiscogsBtn(){ var btn=document.getElementById('btn-open-discogs'); var url=lastMeta&&lastMeta.url||''; btn.disabled=!url; btn.onclick=function(){ if(url) window.open(url,'_blank'); } }
+
+    function fetchDiscogs(ean, token){ return new Promise(function(resolve,reject){ if(!token) return reject('notoken'); var url='https://api.discogs.com/database/search?barcode='+encodeURIComponent(ean)+'&type=release&per_page=5';
+      fetch(url,{headers:{'Authorization':'Discogs token='+token}}).then(function(res){ if(!res.ok) throw new Error('Discogs '+res.status); return res.json(); })
+      .then(function(js){ if(!js.results||!js.results.length) throw new Error('Discogs tomt'); var first=js.results[0]; var meta={source:'Discogs', artist:(first.artist||'').replace(/\s\(\d+\)$/,'').trim(), album:first.title||'', ar:String(first.year||''), format:mapFormat(first.format||[]), genre:(first.genre||[]).join(', '), thumb:first.cover_image||'', url:first.uri||''};
+        if(first.resource_url){ fetch(first.resource_url,{headers:{'Authorization':'Discogs token='+token}}).then(function(r){ if(!r.ok) return meta; return r.json(); }).then(function(dj){ if(dj){ meta.artist=((dj.artists||[]).map(function(a){return a.name}).join(', ')||meta.artist).replace(/\s\(\d+\)$/,'').trim(); meta.album=dj.title||meta.album; meta.ar=String(dj.year||meta.ar||''); var fmts=(dj.formats||[]).map(function(f){return f.name}); meta.format=mapFormat(fmts.concat(first.format||[])); var g=(dj.genres||first.genre||[]).concat(dj.styles||[]).filter(Boolean).join(', '); meta.genre=g; meta.thumb=(dj.images&&dj.images[0]&&dj.images[0].uri)||meta.thumb; meta.url=dj.uri||meta.url; } resolve(meta); }).catch(function(){ resolve(meta); }); }
+        else resolve(meta);
+      }).catch(reject); }); }
+    function fetchMusicBrainz(ean){ return fetch('https://musicbrainz.org/ws/2/release/?query=barcode:'+encodeURIComponent(ean)+'&fmt=json&limit=5',{headers:{'Accept':'application/json'}})
+      .then(function(r){ if(!r.ok) throw new Error('MB '+r.status); return r.json(); })
+      .then(function(js){ var rel=js.releases&&js.releases[0]; if(!rel) throw new Error('MB tomt'); var artist=(rel['artist-credit']||[]).map(function(a){return a.name || (a.artist&&a.artist.name)||''}).filter(Boolean).join(', ');
+        return {source:'MusicBrainz', artist:artist, album:rel.title||'', ar:(rel.date||'').slice(0,4), format:String((rel.media&&rel.media[0]&&rel.media[0].format)||'').toUpperCase().replace('VINYL','LP').replace('COMPACT DISC','CD'), genre:String(rel.country||''), thumb:'https://coverartarchive.org/release/'+rel.id+'/front-500', url:'https://musicbrainz.org/release/'+rel.id}; }); }
+
+    function lookupByEAN(eanRaw){ var ean=digitsOnly(eanRaw); if(!ean){ noteEl.value=''; lastMeta=null; updateDiscogsBtn(); return Promise.resolve(null); }
+      noteEl.value='Söker metadata…'; var token=(document.getElementById('discogsToken').value||'').trim();
+      return new Promise(function(resolve){ (token? fetchDiscogs(ean, token): Promise.reject('notoken')).then(function(d){ applyMeta(d); lastMeta=d; updateDiscogsBtn(); noteEl.value='Träff: Discogs'; resolve(d); })
+        .catch(function(){ fetchMusicBrainz(ean).then(function(m){ applyMeta(m); lastMeta=m; updateDiscogsBtn(); noteEl.value='Träff: MusicBrainz'; resolve(m); })
+          .catch(function(){ lastMeta=null; updateDiscogsBtn(); noteEl.value='Ingen träff'; resolve(null); }); }); }); }
+
+    document.getElementById('btn-lookup').onclick=function(){ lookupByEAN($('#ean').value).then(function(meta){ if(meta) autoSave(); }); };
+
+    function autoSave(){ var r=getForm(); if(!r.artist && !r.album) return; data.unshift(r); saveStore(); try{ navigator.vibrate && navigator.vibrate(40);}catch(e){} badge('Skannad & sparad'); setForm({}); }
+
+    // ===== Kamera + Skanner (BD → ZXing) =====
+    var video=document.getElementById('video'); var curStream=null, devices=[], curIndex=0, haveTorch=false, curZoom=1, reader=null, usingBD=false, detector=null, running=false, hit=false;
+    function stopCam(){ try{ if(reader&&reader.reset) reader.reset(); }catch(e){}; reader=null; try{ if(curStream){ curStream.getTracks().forEach(function(t){ t.stop(); }); } }catch(e){}; curStream=null; running=false; hit=false; }
+    function applyZoom(delta){ try{ var track=curStream&&curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('zoom' in caps)) return; curZoom=Math.max(caps.zoom.min||1, Math.min((caps.zoom.max||1),(curZoom+delta))); track.applyConstraints({advanced:[{zoom:curZoom}]}); }catch(e){} }
+    function toggleTorch(){ try{ var track=curStream&&curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(!track||!track.getCapabilities) return; var caps=track.getCapabilities(); if(!('torch' in caps)) return; haveTorch=!haveTorch; track.applyConstraints({advanced:[{torch:haveTorch}]}); document.getElementById('btn-torch').textContent = haveTorch?'Ficklampa: På':'Ficklampa'; }catch(e){} }
+    function listCams(){ return navigator.mediaDevices.enumerateDevices().then(function(all){ devices=all.filter(function(d){return d.kind==='videoinput'}); document.getElementById('btn-swap').disabled = devices.length<2; }); }
+    function startWithDevice(deviceId){ stopCam(); badge('Init kamera…'); var constraints={ video: deviceId? {deviceId:{exact:deviceId}} : {facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30}}, audio:false };
+      return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){ video.srcObject=stream; curStream=stream; return video.play(); }).then(function(){ var track=curStream.getVideoTracks&&curStream.getVideoTracks()[0]; if(track&&track.getCapabilities){ var caps=track.getCapabilities(); document.getElementById('btn-zoom-in').disabled=!(caps.zoom); document.getElementById('btn-zoom-out').disabled=!(caps.zoom); document.getElementById('btn-torch').disabled=!(caps.torch); } else { document.getElementById('btn-zoom-in').disabled=true; document.getElementById('btn-zoom-out').disabled=true; document.getElementById('btn-torch').disabled=true; } return listCams(); })
+        .then(function(){ badge('Kamera igång'); startScannerAuto(); }).catch(function(e){ badge('Kamerafel: '+(e&&e.name||e)); }); }
+
     function startScannerAuto(){ if('BarcodeDetector' in window){ usingBD=true; startBD(); } else { usingBD=false; ensureZXing(startZXing); } }
-
-    // === BarcodeDetector (inbyggd) ===
-    function startBD(){ try{ detector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); running=true; loopBD(); noteEl.textContent='(Inbyggd skanner)'; }catch(e){ usingBD=false; ensureZXing(startZXing); } }
+    function startBD(){ try{ detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); running=true; loopBD(); noteEl.value='(Inbyggd skanner)'; }catch(e){ usingBD=false; ensureZXing(startZXing); } }
     function loopBD(){ if(!running||hit) return; if(video.readyState>=2){ detector.detect(video).then(function(res){ if(res&&res.length){ var code=res[0].rawValue||res[0].raw||''; if(code){ onHit(code); return; } } setTimeout(loopBD,60); }).catch(function(){ setTimeout(loopBD,120); }); } else { setTimeout(loopBD,120); } }
 
-    // === ZXing loader (multi-CDN fallback) ===
-    function loadScript(src, onload, onerror){ var s=document.createElement('script'); s.src=src; s.onload=onload; s.onerror=onerror||function(){}; document.head.appendChild(s); }
-    function ensureZXing(cb){ if(window.ZXing && window.ZXing.BrowserMultiFormatReader){ cb(); return; }
-      noteEl.textContent='Laddar ZXing…';
-      var urls=[
-        'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js',
-        'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'
-      ];
-      var i=0; (function tryNext(){ if(i>=urls.length){ noteEl.textContent='Kunde inte ladda ZXing (blockerat?). Prova inkognito eller stäng av adblock/VPN.'; return; }
-        loadScript(urls[i], function(){ noteEl.textContent=''; cb(); }, function(){ i++; tryNext(); });
-      })();
-    }
+    function loadScript(src, ok, err){ var s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=err||function(){}; document.head.appendChild(s); }
+    function ensureZXing(cb){ if(window.ZXing&&window.ZXing.BrowserMultiFormatReader){ cb(); return; } noteEl.value='Laddar ZXing…'; var urls=['https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js','https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js']; var i=0; (function next(){ if(i>=urls.length){ noteEl.value='Kunde inte ladda ZXing (blockerat?)'; return;} loadScript(urls[i], function(){ noteEl.value='(ZXing)'; cb(); }, function(){ i++; next(); }); })(); }
+    function startZXing(){ if(!window.ZXing||!window.ZXing.BrowserMultiFormatReader){ noteEl.value='ZXing saknas'; return;} badge('Startar ZXing…'); try{ var ZX=window.ZXing; try{ reader=new ZX.BrowserMultiFormatReader(); }catch(e){ reader=new ZX.BrowserMultiFormatReader(); } if(reader.decodeFromVideoElementContinuously){ reader.decodeFromVideoElementContinuously(video, function(result, err){ if(result){ onHit(result.getText()); } }); } else { (function loop(){ reader.decodeFromVideoElement(video).then(function(res){ onHit(res.getText()); }).catch(function(){ setTimeout(loop,120); }); })(); } }catch(e){ noteEl.value='ZXing-fel: '+e; } }
 
-    // === ZXing (utan setHints-beroende) ===
-    function startZXing(){ if(!window.ZXing||!window.ZXing.BrowserMultiFormatReader){ noteEl.textContent='ZXing saknas'; return; } log('Startar ZXing…');
-      try{
-        var ZX=window.ZXing, hints=null; try{ if(window.Map && ZX.DecodeHintType && ZX.BarcodeFormat){ hints=new Map(); hints.set(ZX.DecodeHintType.POSSIBLE_FORMATS,[ZX.BarcodeFormat.EAN_13,ZX.BarcodeFormat.EAN_8,ZX.BarcodeFormat.UPC_A,ZX.BarcodeFormat.UPC_E]); hints.set(ZX.DecodeHintType.TRY_HARDER,true); } }catch(e){}
-        try{ reader = hints ? new ZX.BrowserMultiFormatReader(hints) : new ZX.BrowserMultiFormatReader(); } catch(e){ reader = new ZX.BrowserMultiFormatReader(); }
-        if(reader.decodeFromVideoElementContinuously){ reader.decodeFromVideoElementContinuously(video, function(result, err){ if(result){ onHit(result.getText()); } }); }
-        else { (function loop(){ reader.decodeFromVideoElement(video).then(function(res){ onHit(res.getText()); }).catch(function(){ setTimeout(loop, 120); }); })(); }
-        noteEl.textContent='(ZXing)';
-      }catch(e){ noteEl.textContent='ZXing-fel: '+e; }
-    }
+    function onHit(code){ if(!code) return; $('#ean').value=code; badge('Kod: '+code); try{ navigator.vibrate && navigator.vibrate(40);}catch(e){}; lookupByEAN(code).then(function(meta){ if(meta) autoSave(); }); stopCam(); }
 
-    // === Stillbild‑scan: funkar med BD eller ZXing ===
-    function stillScan(){ if(!curStream){ return; } var w=video.videoWidth||1280, h=video.videoHeight||720; snap.width=w; snap.height=h; var ctx=snap.getContext('2d'); ctx.drawImage(video,0,0,w,h);
-      if(usingBD && detector){ detector.detect(snap).then(function(res){ if(res&&res.length){ onHit(res[0].rawValue||res[0].raw||''); } else { flashMsg('Ingen kod på stillbild. Prova zoom + ljus.'); } }).catch(function(){ flashMsg('Fel vid BD‑stillbild.'); }); return; }
-      if(window.ZXing && reader && reader.decodeFromImage){ try{ var img=new Image(); img.onload=function(){ reader.decodeFromImage(img).then(function(r){ onHit(r.getText()); }).catch(function(){ flashMsg('Ingen kod på stillbild.'); }); }; img.src=snap.toDataURL('image/png'); }catch(e){ flashMsg('ZXing saknar stillbild‑decode.'); }
-      } else { flashMsg('Stöds inte i detta läge.'); }
-    }
+    function start(){ navigator.mediaDevices.getUserMedia({video:true,audio:false}).then(function(tmp){ tmp.getTracks().forEach(function(t){ t.stop(); }); return listCams(); }).then(function(){ var backIdx=0; for(var i=0;i<devices.length;i++){ if(/back|rear|environment/i.test(devices[i].label)){ backIdx=i; break; } } curIndex=Math.min(backIdx, Math.max(0, devices.length-1)); document.getElementById('btn-swap').disabled = devices.length<2; return startWithDevice(devices[curIndex] && devices[curIndex].deviceId); }).catch(function(){ return startWithDevice(null); }); }
 
-    function flashMsg(m){ noteEl.textContent=m; setTimeout(function(){ if(noteEl.textContent===m) noteEl.textContent=''; }, 1600); }
+    document.getElementById('btn-start').onclick=start; document.getElementById('btn-swap').onclick=function(){ if(!devices.length) return; curIndex=(curIndex+1)%devices.length; startWithDevice(devices[curIndex] && devices[curIndex].deviceId); };
+    document.getElementById('btn-torch').onclick=toggleTorch; document.getElementById('btn-zoom-in').onclick=function(){ applyZoom(0.25); }; document.getElementById('btn-zoom-out').onclick=function(){ applyZoom(-0.25); };
 
-    function onHit(code){ if(!code) return; hit=true; $('#ean').value=code; log('Kod: '+code); try{ navigator.vibrate && navigator.vibrate(40); }catch(e){} stop(); }
-
-    function start(){ navigator.mediaDevices.getUserMedia({video:true,audio:false}).then(function(tmp){ tmp.getTracks().forEach(function(t){ t.stop(); }); return listCams(); }).then(function(){ var backIdx=0; for(var i=0;i<devices.length;i++){ if(/back|rear|environment/i.test(devices[i].label)){ backIdx=i; break; } } curIndex = Math.min(backIdx, Math.max(0, devices.length-1)); $('#btn-swap').disabled = devices.length<2; return startWithDevice(devices[curIndex] && devices[curIndex].deviceId); }).catch(function(){ return startWithDevice(null); }); }
-
-    $('#btn-start').onclick=start;
-    $('#btn-swap').onclick=function(){ if(!devices.length) return; curIndex=(curIndex+1)%devices.length; startWithDevice(devices[curIndex] && devices[curIndex].deviceId); };
-    $('#btn-torch').onclick=toggleTorch;
-    $('#btn-zoom-in').onclick=function(){ applyZoom(0.25); };
-    $('#btn-zoom-out').onclick=function(){ applyZoom(-0.25); };
-    $('#btn-still').onclick=stillScan;
-    $('#btn-copy').onclick=function(){ try{ navigator.clipboard.writeText($('#ean').value||''); log('EAN kopierad'); }catch(e){} };
+    render();
   </script>
 </body>
 </html>
-"""
-path = "/mnt/data/index.html"
-with open(path, "w", encoding="utf-8") as f:
-    f.write(html)
-print(path)
-
