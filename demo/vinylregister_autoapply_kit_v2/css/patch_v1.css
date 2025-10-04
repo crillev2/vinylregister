@@ -1,0 +1,93 @@
+
+/* --- vinylregister patch v1 --- */
+
+/* 1) Metadata grid: two columns with a visible gap */
+.metadata-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Make inputs a tad narrower, keep room for select arrow */
+.metadata-grid .field{
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 520px;
+  min-width: 240px;
+}
+
+.metadata-grid select{
+  padding-right: 2rem;
+}
+
+/* Stack on narrow screens */
+@media (max-width: 900px){
+  .metadata-grid{
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 2) Manual fields: subtle background */
+.manual-field{
+  background: #f8fbff;
+  border: 1px solid #dbe7ff;
+}
+.manual-field:focus{
+  outline: 2px solid #9ec5ff;
+  background: #ffffff;
+}
+
+/* 3) Hide EAN column in register (apply class="col-ean" on that th/td) */
+.col-ean{ display: none !important; }
+
+/* 4) Print/PDF improvements */
+@media print{
+  html, body{
+    width: 210mm;
+    height: 297mm;
+    -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+    font-size: 12pt;
+  }
+  table{
+    width: 100% !important;
+    table-layout: fixed;
+  }
+  th, td{
+    padding: 6px 8px;
+    word-break: break-word;
+  }
+  .no-print{ display: none !important; }
+  .page-break{ page-break-before: always; }
+}
+@page{
+  size: A4 portrait;
+  margin: 12mm;
+}
+
+/* 5) Small utility: toolbar/nav buttons */
+.vr-nav{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  margin:8px 0 16px;
+}
+.vr-btn{
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #f6f6f6;
+  cursor: pointer;
+}
+.vr-btn:hover{
+  background: #eee;
+}
+/* 6) Placeholder thumbnail styling */
+.vr-thumb{
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  aspect-ratio: 1/1;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+}

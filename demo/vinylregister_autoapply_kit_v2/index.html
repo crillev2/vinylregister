@@ -1,0 +1,93 @@
+
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vinylregister – Testkit</title>
+  <link rel="stylesheet" href="css/patch_v1.css">
+  <style>
+    body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    h1{ margin: 0 0 12px; }
+    .section{ border:1px solid #e5e5e5; border-radius:12px; padding:12px; margin:12px 0; }
+    label.field{ display:flex; flex-direction:column; gap:6px; }
+    .metadata-grid span{ font-size: 0.9rem; color:#555; }
+  </style>
+</head>
+<body>
+
+  <!-- Top nav will be inserted automatically by auto_apply_v2.js if absent -->
+
+  <h1>Vinylregister – Demo</h1>
+  <p>Detta är ett test-kit så att du kan se ändringarna utan att röra ditt riktiga projekt.</p>
+
+  <div class="section">
+    <h2>Metadata (demo)</h2>
+    <div class="metadata-grid">
+      <label class="field">
+        <span>Artist</span>
+        <input id="artist" type="text" placeholder="Ex. Deep Purple">
+      </label>
+      <label class="field">
+        <span>Titel</span>
+        <input id="title" type="text" placeholder="Ex. Burn">
+      </label>
+      <label class="field">
+        <span>Skick</span>
+        <select id="grade">
+          <option value="">Välj …</option>
+          <option>VG</option>
+          <option>VG+</option>
+          <option>EX</option>
+          <option>NM</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Försäljningspris</span>
+        <input id="salePrice" type="number" step="1" placeholder="Ex. 120">
+      </label>
+      <!-- Inköpsdatum läggs in automatiskt av auto_apply_v2.js om det saknas -->
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Register (demo)</h2>
+    <div class="table-wrap">
+      <table id="registerTable">
+        <thead>
+          <tr>
+            <th>Artist</th>
+            <th>Titel</th>
+            <th>Skick</th>
+            <th>Pris</th>
+            <th>Antal</th>
+            <th>EAN</th> <!-- Blir dold av auto_apply_v2.js -->
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Deep Purple</td>
+            <td>Burn</td>
+            <td>VG+</td>
+            <td>120</td>
+            <td>2</td>
+            <td>5901234123457</td>
+          </tr>
+          <tr>
+            <td>Led Zeppelin</td>
+            <td>IV</td>
+            <td>EX</td>
+            <td>180</td>
+            <td>1</td>
+            <td>5012345678901</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p>Tips: Besök <strong>index.html?demo=1</strong> för att fylla <code>localStorage</code> med testposter och klicka på "Rapport" i toppmenyn.</p>
+
+  <script src="js/auto_apply_v2.js"></script>
+</body>
+</html>

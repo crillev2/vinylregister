@@ -1,0 +1,100 @@
+
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vinylregister – Rapport</title>
+  <link rel="stylesheet" href="css/patch_v1.css">
+  <style>
+    body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    h1{ margin: 0 0 16px; }
+    .card{ border:1px solid #e5e5e5; border-radius:12px; padding:16px; margin-bottom:16px; }
+    .muted{ color:#666; font-size: 0.95rem; }
+    .kpi{ display:flex; gap:16px; flex-wrap:wrap; }
+    .kpi .box{ flex: 1 1 180px; border:1px solid #eee; border-radius:12px; padding:12px; }
+    .kpi .label{ font-size: 0.85rem; color:#666; }
+    .kpi .value{ font-size: 1.6rem; font-weight: 700; }
+    .table-wrap { overflow:auto; border:1px solid #eee; border-radius:12px; }
+    table{ width:100%; border-collapse: collapse; }
+    th, td{ padding:10px; border-bottom:1px solid #f0f0f0; text-align:left; }
+    th{ background:#fafafa; }
+    .right{ text-align:right; }
+    .controls{ display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+    .hint{ font-size:0.9rem; color:#666; }
+  </style>
+</head>
+<body>
+  <div class="vr-nav no-print">
+    <button class="vr-btn" onclick="window.location.href='index.html#register'">← Till Register</button>
+    <button class="vr-btn" onclick="window.print()">Skriv ut / PDF</button>
+  </div>
+  <h1>Rapporter</h1>
+  <p class="muted">Denna sida läser data från <code>localStorage</code> (nyckel: <code>vinyl_records</code>). Exportera gärna från din app till den nyckeln för att testa.</p>
+
+  <div class="card">
+    <h2>Översikt</h2>
+    <div class="kpi">
+      <div class="box">
+        <div class="label">Antal titlar i lager</div>
+        <div id="kpiTitles" class="value">–</div>
+      </div>
+      <div class="box">
+        <div class="label">Totalt lager (ex)</div>
+        <div id="kpiStock" class="value">–</div>
+      </div>
+      <div class="box">
+        <div class="label">Sålda (totalt)</div>
+        <div id="kpiSold" class="value">–</div>
+      </div>
+      <div class="box">
+        <div class="label">Snitt dagar i lager (per skiva)</div>
+        <div id="kpiAvgDays" class="value">–</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>TopplistOR (exempel)</h2>
+    <div class="controls">
+      <label>Period sålda från: <input type="date" id="soldFrom"></label>
+      <label>till: <input type="date" id="soldTo"></label>
+      <button class="vr-btn" id="btnFilterSold">Filtrera</button>
+      <span class="hint">Lämna tomt för att se allt.</span>
+    </div>
+    <div class="table-wrap">
+      <table id="tblSold">
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Artist</th>
+            <th>Titel</th>
+            <th class="right">Pris</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Skivor med längst liggtid (för REA-idéer)</h2>
+    <div class="table-wrap">
+      <table id="tblAging">
+        <thead>
+          <tr>
+            <th>Artist</th>
+            <th>Titel</th>
+            <th>Inköpsdatum</th>
+            <th class="right">Dagar i lager</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="hint">Tips: sänk pris eller paketera 2 för 1.</p>
+  </div>
+
+  <script src="js/rapport.js"></script>
+</body>
+</html>
