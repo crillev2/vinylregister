@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Rapport</title>
+  <title>Vinylregister – Rapport v2</title>
   <link rel="stylesheet" href="css/patch_v1.css">
   <style>
     body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
@@ -30,7 +30,7 @@
     <button class="vr-btn" onclick="window.print()">Skriv ut / PDF</button>
   </div>
   <h1>Rapporter</h1>
-  <p class="muted">Denna sida läser data från <code>localStorage</code> (nyckel: <code>vinyl_records</code>). Exportera gärna från din app till den nyckeln för att testa.</p>
+  <p class="muted">Denna sida läser data från <code>localStorage</code> (<code>vinyl_records</code>).</p>
 
   <div class="card">
     <h2>Översikt</h2>
@@ -47,20 +47,16 @@
         <div class="label">Sålda (totalt)</div>
         <div id="kpiSold" class="value">–</div>
       </div>
-      <div class="box">
-        <div class="label">Snitt dagar i lager (per skiva)</div>
-        <div id="kpiAvgDays" class="value">–</div>
-      </div>
     </div>
   </div>
 
   <div class="card">
-    <h2>TopplistOR (exempel)</h2>
+    <h2>Senaste försäljningar</h2>
     <div class="controls">
-      <label>Period sålda från: <input type="date" id="soldFrom"></label>
-      <label>till: <input type="date" id="soldTo"></label>
+      <label>Från: <input type="date" id="soldFrom"></label>
+      <label>Till: <input type="date" id="soldTo"></label>
       <button class="vr-btn" id="btnFilterSold">Filtrera</button>
-      <span class="hint">Lämna tomt för att se allt.</span>
+      <span class="hint">Lämna tomt för allt.</span>
     </div>
     <div class="table-wrap">
       <table id="tblSold">
@@ -78,7 +74,29 @@
   </div>
 
   <div class="card">
-    <h2>Skivor med längst liggtid (för REA-idéer)</h2>
+    <h2>Mest sålda (antal)</h2>
+    <div class="controls">
+      <label>Period (dagar): <input type="number" id="topDays" min="1" value="90" style="width:80px"></label>
+      <label>Max rader: <input type="number" id="topLimit" min="5" value="20" style="width:80px"></label>
+      <button class="vr-btn" id="btnBuildTop">Bygg lista</button>
+      <span class="hint">Summerar antal sålda per (Artist + Titel) inom vald period.</span>
+    </div>
+    <div class="table-wrap">
+      <table id="tblTopSold">
+        <thead>
+          <tr>
+            <th>Artist</th>
+            <th>Titel</th>
+            <th class="right">Antal</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Långliggare (för REA-idéer)</h2>
     <div class="table-wrap">
       <table id="tblAging">
         <thead>
@@ -92,9 +110,8 @@
         <tbody></tbody>
       </table>
     </div>
-    <p class="hint">Tips: sänk pris eller paketera 2 för 1.</p>
   </div>
 
-  <script src="js/rapport.js"></script>
+  <script src="js/rapport_v2.js"></script>
 </body>
 </html>
