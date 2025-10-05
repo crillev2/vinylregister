@@ -10,6 +10,13 @@
     display: none !important;
   }
 </style>
+<style>
+  /* EAN är kolumn 6 i din headerrad */
+  table:has(th[data-col="ean"]) th[data-col="ean"],
+  table:has(th[data-col="ean"]) tbody td:nth-child(6) {
+    display: none !important;
+  }
+</style>
 
   <head>
   <style>
