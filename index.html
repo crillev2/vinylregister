@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <html lang="sv">
-<head>
+<!-- (om du inte redan har denna) -->
+<link rel="stylesheet" href="css/patch_v1.css">
+
+<!-- Fallback: göm EAN-kolumn även om JS inte hinner (EAN är kolumn 6 i din tabellrad) -->
+<style>
+  table:has(th[data-col="ean"]) th[data-col="ean"],
+  table:has(th[data-col="ean"]) tbody td:nth-child(6) {
+    display: none !important;
+  }
+</style>
+
+  <head>
   <style>
   /* Om tabellen har en EAN-header, göm den headern + kolumnen */
   table:has(th[data-col="ean"]) th[data-col="ean"],
@@ -263,9 +274,273 @@ document.addEventListener('DOMContentLoaded', function(){
   }
 })();
 </script>
+<script src="js/auto_apply_v3.js?v=6"></script>
+<script>
+/* ===== Vinylregister – HOTFIX v2 (spara-bugg) =====
+   Fixar att "första skivan" inte återanvänds vid varje sparning.
+   1) Wrappar window.records så att .push() alltid klonar objektet
+   2) (Valfritt) Tar över submit/Spara om du sätter FORCE_TAKEOVER = true
+*/
+(function(){
+  "use strict";
 
-<body>
-  <script src="js/auto_apply_v3.js?v=6"></script>
+  // ---- 0) Liten markör att patchen laddats
+  try{
+    const tag = document.createElement('div');
+    tag.textContent = "Patch v2 aktiv";
+    Object.assign(tag.style, {position:'fixed',left:'12px',bottom:'12px',background:'#F5FFF0',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
+    document.body.appendChild(tag);
+    setTimeout(()=>tag.remove(), 1500);
+  }catch(e){}
+
+  // ---- 1) Klon-funktion (faller tillbaka om structuredClone saknas)
+  function cloneDeep(obj){
+    try{ return structuredClone(obj); }catch(e){
+      try{ return JSON.parse(JSON.stringify(obj)); }catch(_){ return Object.assign({}, obj); }
+    }
+  }
+
+  // ---- 2) Wrappar window.records så .push klonar argumenten
+  function wrapRecordsArray(arr){
+    if (!Array.isArray(arr) || arr.__vrProxied) return arr;
+    const prox = new Proxy(arr, {
+      get(target, prop, recv){
+        if (prop === 'push'){
+          return function(...items){
+            const clones = items.map(x=> cloneDeep(x));
+            return Array.prototype.push.apply(target, clones);
+          };
+        }
+        return Reflect.get(target, prop, recv);
+      }
+    });
+    Object.defineProperty(prox, "__vrProxied", {value:true});
+    return prox;
+  }
+
+  function ensureRecordsWrapped(){
+    if (Array.isArray(window.records)){
+      if (!window.records.__vrChecked){
+        window.records = wrapRecordsArray(window.records);
+        Object.defineProperty(window.records, "__vrChecked", {value:true});
+      }
+      return;
+    }
+    // Om appen sätter window.records senare – försök igen
+    setTimeout(ensureRecordsWrapped, 200);
+  }
+
+  // Kör nu och några gånger till (ifall appen initierar sent)
+  ensureRecordsWrapped();
+  let tries = 20;
+  const iv = setInterval(()=>{ ensureRecordsWrapped(); if(--tries<=0) clearInterval(iv); }, 300);
+
+  // ---- 3) (Plan B) Ta över "Spara" / submit – AV som standard
+  const FORCE_TAKEOVER = false; // sätt true om du vill att denna tar över sparandet
+
+  function buildRecordFromDOM(){
+    const get = sel => (document.querySelector(sel)||{}).value || "";
+    const getText = sel => (document.querySelector(sel)||{}).textContent || "";
+    const n = v => Number(v||0)||0;
+
+    // Försök läsa från inputs om de finns, annars från ev. förhandsvisning
+    const record = {
+      id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
+      artist: get('#artist') || get('[name="artist"]') || getText('#scan-artist') || "",
+      title:  get('#album')  || get('#title') || get('[name="title"]') || getText('#scan-title') || "",
+      year:   get('#year')   || get('[name="year"]') || "",
+      format: get('#format') || get('[name="format"]') || "",
+      ean:    get('#ean')    || get('[name="ean"]') || get('[name="barcode"]') || getText('#scan-ean') || "",
+      purchaseDate: get('#purchaseDate') || "",
+      purchasePrice: n(get('#purchasePrice')),
+      askPrice:      n(get('#askPrice')),
+      paidPrice:     n(get('#paidPrice')),
+      stockQty:      n(get('#stockQty')) || 1,
+      thumbUrl: (document.querySelector('#thumb')||{}).src || ""
+    };
+    return record;
+  }
+
+  function loadList(){
+    if (Array.isArray(window.records)) return window.records;
+    try{
+      const raw = localStorage.getItem('vinyl_records');
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    }catch(_){ return []; }
+  }
+  function saveList(list){
+    if (Array.isArray(window.records)) window.records = list;
+    if (typeof window.persistRecords === 'function'){ try{ window.persistRecords(list); return; }catch(_){ } }
+    try{ localStorage.setItem('vinyl_records', JSON.stringify(list)); }catch(_){}
+  }
+  function mergeOrPush(list, rec){
+    const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+    if (same){ same.stockQty = (Number(same.stockQty)||0) + (Number(rec.stockQty)||1); return list; }
+    list.push(rec); return list;
+  }
+
+  function takeoverSave(){
+    // Ta över submit på alla forms
+    document.addEventListener('submit', function(ev){
+      if (!FORCE_TAKEOVER) return;
+      ev.preventDefault(); ev.stopPropagation();
+      const rec = buildRecordFromDOM();
+      const list = loadList();
+      mergeOrPush(list, rec);
+      saveList(list);
+    }, true);
+
+    // Ta över knappar som sannolikt sparar
+    document.addEventListener('click', function(ev){
+      if (!FORCE_TAKEOVER) return;
+      const btn = ev.target.closest('#btnSave, .btn-save, .save, button[type="submit"], input[type="submit"], button[onclick*="save"]');
+      if (!btn) return;
+      ev.preventDefault(); ev.stopPropagation();
+      const rec = buildRecordFromDOM();
+      const list = loadList();
+      mergeOrPush(list, rec);
+      saveList(list);
+    }, true);
+  }
+  takeoverSave();
+})();
+</script>
+<!-- === AUTO-PATCH (EAN, Inköpsdatum, snabb-sök, toppmeny, m.m.) === -->
+<script src="js/auto_apply_v3.js?v=7"></script>
+
+<!-- === HOTFIX v2 – stoppar "första skivan sparas varje gång" === -->
+<script>
+/* Vinylregister – HOTFIX v2
+   1) Wrappar window.records så .push() alltid klonar objektet (bryter referens-buggen)
+   2) (valfritt) Plan B – ta över "Spara" helt: sätt FORCE_TAKEOVER = true
+*/
+(function(){
+  "use strict";
+
+  // Liten markör så vi ser att patchen laddats
+  try{
+    const tag = document.createElement('div');
+    tag.textContent = "Patch v2 aktiv";
+    Object.assign(tag.style, {position:'fixed',left:'12px',bottom:'12px',background:'#F5FFF0',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
+    document.body.appendChild(tag);
+    setTimeout(()=>tag.remove(), 1200);
+  }catch(e){}
+
+  // Deep clone som funkar brett
+  function cloneDeep(obj){
+    try{ return structuredClone(obj); }catch(e){
+      try{ return JSON.parse(JSON.stringify(obj)); }catch(_){ return Object.assign({}, obj); }
+    }
+  }
+
+  // Proxy som klonar allt som pushas
+  function wrapRecordsArray(arr){
+    if (!Array.isArray(arr) || arr.__vrProxied) return arr;
+    const prox = new Proxy(arr, {
+      get(target, prop, recv){
+        if (prop === 'push'){
+          return function(...items){
+            const clones = items.map(x=> cloneDeep(x));
+            return Array.prototype.push.apply(target, clones);
+          };
+        }
+        return Reflect.get(target, prop, recv);
+      }
+    });
+    Object.defineProperty(prox, "__vrProxied", {value:true});
+    return prox;
+  }
+
+  function ensureRecordsWrapped(){
+    if (Array.isArray(window.records)){
+      if (!window.records.__vrChecked){
+        window.records = wrapRecordsArray(window.records);
+        Object.defineProperty(window.records, "__vrChecked", {value:true});
+      }
+      return;
+    }
+    // Försök igen om appen sätter window.records senare
+    setTimeout(ensureRecordsWrapped, 200);
+  }
+
+  // Kör nu + några extra gånger (vanligt på mobil)
+  ensureRecordsWrapped();
+  let tries = 20;
+  const iv = setInterval(()=>{ ensureRecordsWrapped(); if(--tries<=0) clearInterval(iv); }, 300);
+
+  // --- Plan B: ta över "Spara" helt (AV som standard) ---
+  const FORCE_TAKEOVER = false; // sätt till true om det fortfarande blir fel efter proxyn
+
+  function buildRecordFromDOM(){
+    const get = sel => (document.querySelector(sel)||{}).value || "";
+    const getText = sel => (document.querySelector(sel)||{}).textContent || "";
+    const n = v => Number(v||0)||0;
+
+    return {
+      id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
+      artist: get('#artist') || get('[name="artist"]') || getText('#scan-artist') || "",
+      title:  get('#album')  || get('#title') || get('[name="title"]') || getText('#scan-title') || "",
+      year:   get('#year')   || get('[name="year"]') || "",
+      format: get('#format') || get('[name="format"]') || "",
+      ean:    get('#ean')    || get('[name="ean"]') || get('[name="barcode"]') || getText('#scan-ean') || "",
+      purchaseDate: get('#purchaseDate') || "",
+      purchasePrice: n(get('#purchasePrice')),
+      askPrice:      n(get('#askPrice')),
+      paidPrice:     n(get('#paidPrice')),
+      stockQty:      n(get('#stockQty')) || 1,
+      thumbUrl: (document.querySelector('#thumb')||{}).src || ""
+    };
+  }
+
+  function loadList(){
+    if (Array.isArray(window.records)) return window.records;
+    try{
+      const raw = localStorage.getItem('vinyl_records');
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    }catch(_){ return []; }
+  }
+  function saveList(list){
+    if (Array.isArray(window.records)) window.records = list;
+    if (typeof window.persistRecords === 'function'){ try{ window.persistRecords(list); return; }catch(_){ } }
+    try{ localStorage.setItem('vinyl_records', JSON.stringify(list)); }catch(_){}
+  }
+  function mergeOrPush(list, rec){
+    const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+    if (same){ same.stockQty = (Number(same.stockQty)||0) + (Number(rec.stockQty)||1); return list; }
+    list.push(rec); return list;
+  }
+
+  function takeoverSave(){
+    // Ta över form submit
+    document.addEventListener('submit', function(ev){
+      if (!FORCE_TAKEOVER) return;
+      ev.preventDefault(); ev.stopPropagation();
+      const rec = buildRecordFromDOM();
+      const list = loadList();
+      mergeOrPush(list, rec);
+      saveList(list);
+    }, true);
+
+    // Ta över knappar som sannolikt sparar
+    document.addEventListener('click', function(ev){
+      if (!FORCE_TAKEOVER) return;
+      const btn = ev.target.closest('#btnSave, .btn-save, .save, button[type="submit"], input[type="submit"], button[onclick*="save"]');
+      if (!btn) return;
+      ev.preventDefault(); ev.stopPropagation();
+      const rec = buildRecordFromDOM();
+      const list = loadList();
+      mergeOrPush(list, rec);
+      saveList(list);
+    }, true);
+  }
+  takeoverSave();
+})();
+</script>
+
+  <body>
+  
   <header>
     <div class="bar">
       <div class="brand">
