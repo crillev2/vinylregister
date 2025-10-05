@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Scanner (manuell stängning)</title>
+  <title>Vinylregister – Scanner + Metadata</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; --chip:#f6f6f6; }
     * { box-sizing: border-box; }
@@ -29,21 +29,19 @@
     .col-ean{ display:none !important; } /* döljer EAN-kolumnen */
     #quickSearch{ width:100%; margin:8px 0 12px; }
     @media (max-width: 900px){ .metadata-grid{ grid-template-columns:1fr; } }
-
     /* Scanner overlay */
     .scanner-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:none; align-items:center; justify-content:center; z-index:99999; }
     .scanner-card{ width:min(640px, 96vw); background:#000; border-radius:16px; overflow:hidden; border:1px solid #333; }
     .scanner-video{ width:100%; max-height:60vh; background:#000; }
     .scanner-bar{ display:flex; gap:8px; padding:8px; background:#111; color:#fff; align-items:center; justify-content:space-between; }
     .scanner-status{ font-size:.9rem; opacity:.9; }
+    .toast{ position:fixed; right:12px; bottom:12px; background:#eef7ff; border:1px solid #bcd; padding:8px 12px; border-radius:8px; z-index:99999; }
   </style>
-
   <!-- Fallback: göm EAN även utan JS (EAN är kolumn 6) -->
   <style>
     table:has(th[data-col="ean"]) th[data-col="ean"],
     table:has(th[data-col="ean"]) tbody td:nth-child(6) { display:none !important; }
   </style>
-
   <!-- ZXing fallback (laddas endast om BarcodeDetector saknas) -->
   <script>
     (function(){
@@ -130,11 +128,26 @@
   (function(){
     "use strict";
 
+    /* kvitto */
+    try{
+      const tag = document.createElement('div');
+      tag.textContent = "Lookup aktiv";
+      Object.assign(tag.style, {position:'fixed',left:'12px',bottom:'12px',background:'#F0FFF5',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
+      document.body.appendChild(tag); setTimeout(()=>tag.remove(), 1200);
+    }catch(e){}
+
     const $ = (s,r=document)=>r.querySelector(s);
     const n = v => Number(v||0)||0;
 
+    /* ---- data store ---- */
     function loadList(){ try{ const raw=localStorage.getItem("vinyl_records"); const arr=raw?JSON.parse(raw):[]; return Array.isArray(arr)?arr:[]; }catch(_){ return []; } }
     function saveList(list){ try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){ } }
+
+    /* ---- UI helpers ---- */
+    function toast(msg){
+      const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
+      document.body.appendChild(t); setTimeout(()=>t.remove(), 1400);
+    }
 
     function daysBetween(d1, d2){ const a=(d1 instanceof Date)?d1:new Date(d1); const b=(d2 instanceof Date)?d2:new Date(d2); if(isNaN(a)||isNaN(b))return ""; return Math.floor(Math.abs(b-a)/(1000*60*60*24)); }
 
@@ -190,7 +203,7 @@
       ev.preventDefault();
       const rec = buildRecordFromForm();
       const list = loadList(); mergeOrPush(list, rec); saveList(list);
-      renderRegisterTable();
+      renderRegisterTable(); toast("Sparat ✅");
     });
 
     $("#quickSearch")?.addEventListener("input", function(){
@@ -200,7 +213,7 @@
       });
     });
 
-    // ====== BARCODE SCANNER (manuell stängning) ======
+    /* ===================== BARCODE SCANNER (manuell stängning) ===================== */
     const overlay = $("#scannerOverlay");
     const video   = $("#scannerVideo");
     const status  = $("#scannerStatus");
@@ -254,9 +267,7 @@
                 onDetected(result.getText());
               }
             });
-          }else{
-            setTimeout(tryStartZX, 300);
-          }
+          }else{ setTimeout(tryStartZX, 300); }
         };
         tryStartZX();
       }
@@ -271,11 +282,8 @@
       stream = null; reader = null; detector = null; rafId = 0;
     }
 
-    function closeScanner(){
-      stopped = true;
-      stopStream();
-      hideOverlay();
-    }
+    function closeScanner(){ stopped = true; stopStream(); hideOverlay(); }
+    document.addEventListener("visibilitychange", function(){ if(document.hidden) closeScanner(); });
 
     async function detectLoop(){
       if(stopped) return;
@@ -306,22 +314,60 @@
       lastCode = code; lastAt = now;
       setStatus("Hittade: " + code + " (lämna öppet om du vill skanna igen)");
       if ('vibrate' in navigator) try{ navigator.vibrate(60); }catch(_){}
-      // fyll fält men stäng inte – användaren kan skanna flera
       const eanEl = $("#ean"); if(eanEl) eanEl.value = code;
+
+      // Auto-lookup metadata nu när EAN finns
+      lookupByEAN(code);
     }
 
     btnScan?.addEventListener("click", startScanner);
     btnClose?.addEventListener("click", closeScanner);
     btnTorch?.addEventListener("click", toggleTorch);
-    btnUse?.addEventListener("click", function(){
-      // "Använd" stänger bara skannern – ean är redan ifylld
-      closeScanner();
-    });
+    btnUse?.addEventListener("click", function(){ closeScanner(); });
 
-    document.addEventListener("visibilitychange", function(){
-      if(document.hidden) closeScanner();
-    });
+    /* ========= Metadata via MusicBrainz ========= */
+    async function lookupByEAN(ean){
+      try{
+        setStatus("Söker metadata…");
+        const url = "https://musicbrainz.org/ws/2/release/?query=barcode:" + encodeURIComponent(ean) + "&fmt=json";
+        const res = await fetch(url, { method:"GET" });
+        if(!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const rel = (data.releases && data.releases.length) ? data.releases[0] : null;
+        if(!rel){ setStatus("Hittade ingen träff"); toast("Ingen träff på streckkoden"); return; }
 
+        // artist
+        let artist = "";
+        if (Array.isArray(rel['artist-credit']) && rel['artist-credit'].length){
+          artist = rel['artist-credit'].map(ac => ac.name || (ac.artist && ac.artist.name) || "").filter(Boolean).join(", ");
+        }
+        // title
+        const title = rel.title || "";
+        // year
+        const year = (rel.date && rel.date.slice(0,4)) || ((rel['release-events'] && rel['release-events'][0] && rel['release-events'][0].date) ? rel['release-events'][0].date.slice(0,4) : "");
+        // format
+        const format = (rel.media && rel.media[0] && rel.media[0].format) ? rel.media[0].format : "";
+
+        // cover (best-effort)
+        const mbid = rel.id;
+        const cover = "https://coverartarchive.org/release/" + mbid + "/front-250";
+
+        // fyll fälten (rör inte manuellt ifyllda om de redan finns)
+        if ($("#artist") && !$("#artist").value) $("#artist").value = artist;
+        if ($("#album")  && !$("#album").value)  $("#album").value  = title;
+        if ($("#year")   && !$("#year").value)   $("#year").value   = year;
+        if ($("#format") && !$("#format").value) $("#format").value = format;
+        if ($("#thumb")) { $("#thumb").src = cover; $("#thumb").alt = title || "Omslag"; }
+
+        setStatus("Klar: " + (artist ? artist + " – " : "") + (title || "Okänt album"));
+        toast("Metadata hämtad ✅");
+      }catch(err){
+        setStatus("Metadata-fel");
+        toast("Kunde inte hämta metadata");
+      }
+    }
+
+    /* init */
     document.addEventListener("DOMContentLoaded", renderRegisterTable);
   })();
   </script>
