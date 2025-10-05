@@ -1,9 +1,10 @@
-// vinylregister auto-apply v3
-// Robust på mobil: MutationObserver + retries för att dölja EAN.
-// Gör även: toppmeny, markerar manuella fält, lägger till Inköpsdatum,
-// quick search ovanför registret, gömmer "Register & Rapport"-summeringar,
-// samt demodata via ?demo=1.
-
+// vinylregister auto-apply v3.1 (stabil)
+// - Robust EAN-gömning (MutationObserver + retries)
+// - Toppmeny (Register/Rapport)
+// - Markerar manuella fält
+// - Lägger till Inköpsdatum
+// - Quick search ovanför #registerTable
+// - Demo-data via ?demo=1
 (function(){
   "use strict";
 
@@ -23,7 +24,7 @@
     return el;
   }
 
-  // Säkerställa CSS för .col-ean, ifall patch_v1.css inte är laddad
+  // Säkerställ CSS för .col-ean (om patch_v1.css saknas)
   function ensureColEanStyle(){
     if (document.getElementById("vr-col-ean-style")) return;
     const style = createEl("style", { id: "vr-col-ean-style" });
@@ -31,10 +32,10 @@
     document.head.appendChild(style);
   }
 
-  // Enkel toppmeny (om du redan har en skapas ingen dubblett)
+  // Enkel toppmeny
   function ensureTopNav(){
     if (document.querySelector(".vr-nav")) return;
-    const nav = createEl("nav", { class: "vr-nav no-print" });
+    const nav = createEl("nav", { class:"vr-nav no-print" });
     const btnReg = createEl("button", { class:"vr-btn", type:"button" }, "Register");
     const btnRap = createEl("button", { class:"vr-btn", type:"button" }, "Rapport");
     btnReg.addEventListener("click", ()=> location.href = "index.html#register");
@@ -44,7 +45,7 @@
                              : document.body.appendChild(nav);
   }
 
-  // Markera vanliga manuella fält med diskret bakgrund (kräver patch_v1.css för fin stil)
+  // Markera manuella fält
   function addManualFieldStyling(){
     ["salePrice","notes","note","customNote","customPrice"].forEach(id=>{
       const el = document.getElementById(id);
@@ -63,7 +64,7 @@
     grid.appendChild(label);
   }
 
-  // Döljer EAN-kolumnen baserat på data-col="ean" eller textmatchning
+  // Göm EAN-kolumn – via data-col="ean" eller rubriktext
   function hideEANColumn(){
     ensureColEanStyle();
 
@@ -81,14 +82,13 @@
         const txtMatch = (text === "ean") || text.includes("ean-kod") || text.includes("streckkod");
         if (eanIndex === -1 && (dataMatch || txtMatch)) eanIndex = idx;
       });
-
       if (eanIndex === -1) return;
 
-      // Dölj headern
+      // Header
       const th = thead.rows[0].cells[eanIndex];
       if (th) th.classList.add("col-ean");
 
-      // Dölj alla celler i den kolumnen
+      // Body-celler
       Array.from(tbl.tBodies).forEach(tbody=>{
         Array.from(tbody.rows).forEach(tr=>{
           const cell = tr.cells[eanIndex];
@@ -98,7 +98,7 @@
     });
   }
 
-  // Om tabellen renderas sent eller uppdateras – kör igen
+  // Kör på sena/dynamiska renderingar
   function startTableObserver(){
     if (!("MutationObserver" in window)) return;
     const observer = new MutationObserver(()=>{
@@ -108,7 +108,7 @@
     observer.observe(document.body, { childList:true, subtree:true });
   }
 
-  // Liten sökruta ovanför registertabellen
+  // Quick search ovanför registertabellen
   function ensureQuickSearch(){
     const table = document.querySelector("#registerTable");
     if (!table) return;
@@ -131,23 +131,7 @@
     });
   }
 
-  // Göm “Register & Rapport”-summeringar som hamnat i inmatningssidan
-  function hideRegisterRapportSummaries(){
-    const keywords = ["Medeldagar", "Sum ", "Register & Rapport", "Summa inköp", "Medeldagar i lager"];
-    document.querySelectorAll("section,div,table").forEach(n=>{
-      const t = (n.innerText || "").trim();
-      if (!t) return;
-      const hit = keywords.some(k => t.toLowerCase().includes(k.toLowerCase()));
-      if (hit && t.length < 2000) n.style.display = "none";
-    });
-    // Om det är en enskild rad i en tabell
-    document.querySelectorAll("table tr").forEach(tr=>{
-      const t = (tr.innerText || "");
-      if (/Medeldagar/i.test(t) || /Sum /i.test(t)) tr.style.display = "none";
-    });
-  }
-
-  // Demodata via ?demo=1 (för rapport.html)
+  // Demodata via ?demo=1
   function installDemoDataIfRequested(){
     const params = new URLSearchParams(location.search);
     if (!params.has("demo")) return;
@@ -169,24 +153,21 @@
       // Kör direkt
       hideEANColumn();
       ensureQuickSearch();
-      hideRegisterRapportSummaries();
 
-      // Extra retries (för långsam render på mobil)
+      // Extra retries för mobil/långsam render
       let retries = 10;
       const retry = setInterval(()=>{
         hideEANColumn();
         ensureQuickSearch();
-        hideRegisterRapportSummaries();
         if (--retries <= 0) clearInterval(retry);
       }, 250);
 
       startTableObserver();
 
-      // Manuell “nödknapp” i console om det skulle behövas
+      // Nödknapp i konsolen vid behov
       window.hideEANColumn = hideEANColumn;
     }catch(e){
-      console.error("auto_apply_v3 error:", e);
+      console.error("auto_apply_v3.1 error:", e);
     }
   });
 })();
-
