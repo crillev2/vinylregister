@@ -40,7 +40,7 @@
     .badge{ position:fixed; left:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
   </style>
 
-  <!-- Fallback: försök gömma EAN även utan JS (stöds ej i alla iOS-versioner) -->
+  <!-- Fallback: försök gömma EAN även utan JS -->
   <style>
     table:has(th[data-col="ean"]) th[data-col="ean"],
     table:has(th[data-col="ean"]) tbody td:nth-child(6) { display:none !important; }
@@ -79,7 +79,7 @@
       <label class="field"><span>Inköpspris</span><input id="purchasePrice" class="manual-field" type="number" step="1"></label>
       <label class="field"><span>Begärt pris</span><input id="askPrice" class="manual-field" type="number" step="1"></label>
       <label class="field"><span>Antal</span><input id="stockQty" class="manual-field" type="number" step="1" value="1"></label>
-      <label class="field"><span>Omslag</span><img id="thumb" class="vr-thumb" alt="cover"></label>
+      <label class="field"><span>Omslag</span><img id="thumb" class="vr-thumb" alt="cover" style="display:none;"></label>
     </div>
     <div class="row-actions">
       <button class="vr-btn" id="btnScan">Skanna streckkod</button>
@@ -91,7 +91,10 @@
   </div>
 
   <div class="wrap" id="register">
-    <h2>Register</h2>
+    <h2 style="display:flex;align-items:center;gap:8px;">
+      Register
+      <button class="vr-btn" id="btnRepair" title="Försök reparera sparade poster">Reparera register</button>
+    </h2>
     <input id="quickSearch" class="manual-field" type="search" placeholder="Sök artist/titel/EAN…">
     <div class="table-wrap">
       <table id="registerTable">
@@ -135,14 +138,13 @@
 
     const KEY = 'vinyl_records';
     const $  = (s,r=document)=>r.querySelector(s);
-    const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
     const n  = v => Number(v||0)||0;
 
     function badge(msg){
       const b=document.createElement('div'); b.className='badge'; b.textContent=msg;
-      document.body.appendChild(b); setTimeout(()=>b.remove(), 2500);
+      document.body.appendChild(b); setTimeout(()=>b.remove(), 2200);
     }
-    badge('Ny version aktiv');
+    badge('Ny version (fix för UFO)');
 
     function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),1400); }
     function storageOK(){ try{ localStorage.setItem('__vr__','1'); localStorage.removeItem('__vr__'); return true; } catch(_){ return false; } }
@@ -247,10 +249,16 @@
     let lastCode = "";
     let lastAt = 0;
     let stopped = true;
+    let lookupInProgress = false; // <-- viktigt
 
     function setStatus(msg){ if(status) status.textContent = msg; }
     function showOverlay(){ overlay.style.display = "flex"; overlay.setAttribute('aria-hidden','false'); }
     function hideOverlay(){ overlay.style.display = "none"; overlay.setAttribute('aria-hidden','true'); }
+
+    function clearMetadataFields(){
+      ["artist","album","year","format"].forEach(id=>{ const el=$("#"+id); if(el) el.value=""; });
+      const img=$("#thumb"); if(img){ img.removeAttribute('src'); img.style.display='none'; }
+    }
 
     async function startScanner(){
       stopped = false; lastCode=""; lastAt=0;
@@ -322,8 +330,10 @@
       lastCode = code; lastAt = now;
       setStatus("Hittade: " + code + " (lämna öppet om du vill skanna igen)");
       if ('vibrate' in navigator) try{ navigator.vibrate(60); }catch(_){}
+      clearMetadataFields();                  // <-- rensa tidigare metadata
       const eanEl = $("#ean"); if(eanEl) eanEl.value = code;
-      lookupByEAN(code); // auto-lookup metadata
+      lookupInProgress = true;                // <-- blockera auto-add under lookup
+      lookupByEAN(code).finally(()=>{ lookupInProgress = false; });
     }
 
     btnScan?.addEventListener("click", startScanner);
@@ -352,28 +362,30 @@
         const mbid = rel.id;
         const cover = "https://coverartarchive.org/release/" + mbid + "/front-250";
 
-        if ($("#artist") && !$("#artist").value) $("#artist").value = artist;
-        if ($("#album")  && !$("#album").value)  $("#album").value  = title;
-        if ($("#year")   && !$("#year").value)   $("#year").value   = year;
-        if ($("#format") && !$("#format").value) $("#format").value = format;
+        if ($("#artist")) $("#artist").value = artist || $("#artist").value;
+        if ($("#album"))  $("#album").value  = title  || $("#album").value;
+        if ($("#year"))   $("#year").value   = year   || $("#year").value;
+        if ($("#format")) $("#format").value = format || $("#format").value;
 
         const img = $("#thumb");
         if (img){
           img.onerror = ()=>{ img.removeAttribute('src'); img.style.display='none'; };
-          img.src = cover; img.alt = title || "Omslag"; img.style.display='';
+          if (cover){ img.src = cover; img.alt = title || "Omslag"; img.style.display=''; }
         }
 
         setStatus("Metadata hämtad");
         toast("Metadata hämtad ✅");
-        maybeAutoAdd();
+        maybeAutoAdd(); // <-- auto-add först EFTER lookup
       }catch(err){
         setStatus("Metadata-fel");
         toast("Kunde inte hämta metadata");
       }
     }
 
+    // Auto-add: triggas på artist/album/title (inte på EAN) och blockeras om lookup pågår
     let lastKey='';
     function maybeAutoAdd(){
+      if (lookupInProgress) return;
       if (!storageOK()) return;
       const rec = buildRecordFromForm();
       if (!(rec.ean && (rec.artist || rec.title))) return;
@@ -384,11 +396,44 @@
       renderRegisterTable();
       toast("Tillagd i register ✅");
     }
-    ["ean","artist","album","title"].forEach(id=>{
+    ["artist","album","title"].forEach(id=>{
       const el = $("#"+id);
-      if(el){
-        ["input","change"].forEach(evt=> el.addEventListener(evt, ()=> setTimeout(maybeAutoAdd, 150), {capture:true}));
+      if(el){ ["input","change"].forEach(evt=> el.addEventListener(evt, ()=> setTimeout(maybeAutoAdd, 150), {capture:true})); }
+    });
+
+    // Reparera redan sparade poster (t.ex. om alla fått “UFO”)
+    $("#btnRepair")?.addEventListener("click", async function(){
+      if (!confirm("Reparera poster med tom/konstig metadata (upp till 25 st)?")) return;
+      let list = load(); let changed=0;
+      for (let i=0;i<list.length && i<25;i++){
+        const rec=list[i]; if(!rec || !rec.ean) continue;
+        const bad = (!rec.artist || !rec.title || rec.artist.toLowerCase()==="ufo");
+        if (!bad) continue;
+        try{
+          const url="https://musicbrainz.org/ws/2/release/?query=barcode:"+encodeURIComponent(rec.ean)+"&fmt=json";
+          const res=await fetch(url); if(!res.ok) continue;
+          const data=await res.json();
+          const rel=(data.releases && data.releases.length)?data.releases[0]:null; if(!rel) continue;
+          let artist="";
+          if (Array.isArray(rel['artist-credit']) && rel['artist-credit'].length){
+            artist = rel['artist-credit'].map(ac => ac.name || (ac.artist && ac.artist.name) || "").filter(Boolean).join(", ");
+          }
+          const title = rel.title || "";
+          const year  = (rel.date && rel.date.slice(0,4)) || ((rel['release-events'] && rel['release-events'][0] && rel['release-events'][0].date) ? rel['release-events'][0].date.slice(0,4) : "");
+          const format= (rel.media && rel.media[0] && rel.media[0].format) ? rel.media[0].format : "";
+          const mbid  = rel.id;
+          const cover = "https://coverartarchive.org/release/" + mbid + "/front-250";
+          if (artist) rec.artist = artist;
+          if (title)  rec.title  = title;
+          if (year)   rec.year   = year;
+          if (format) rec.format = format;
+          if (cover)  rec.thumbUrl = cover;
+          changed++;
+        }catch(_){}
       }
+      save(list);
+      renderRegisterTable();
+      toast("Reparerade: "+changed);
     });
 
     function installDemo(){
