@@ -30,6 +30,12 @@
     #quickSearch{ width:100%; margin:8px 0 12px; }
     @media (max-width: 900px){ .metadata-grid{ grid-template-columns:1fr; } }
 
+    /* Action-knappar i tabellen */
+    .btn-small{ font-size:12px; padding:4px 8px; border:1px solid #ddd; border-radius:8px; background:#fafafa; cursor:pointer; }
+    .btn-small:hover{ background:#f0f0f0; }
+    .btn-small.danger{ border-color:#f3c2c2; background:#fff5f5; }
+    .btn-small.danger:hover{ background:#ffecec; }
+
     /* Scanner overlay */
     .scanner-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:none; align-items:center; justify-content:center; z-index:99999; }
     .scanner-card{ width:min(640px, 96vw); background:#000; border-radius:16px; overflow:hidden; border:1px solid #333; }
@@ -38,6 +44,10 @@
     .scanner-status{ font-size:.9rem; opacity:.9; }
     .toast{ position:fixed; right:12px; bottom:12px; background:#eef7ff; border:1px solid #bcd; padding:8px 12px; border-radius:8px; z-index:99999; }
     .badge{ position:fixed; left:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
+
+    /* Redigeringsläge-hint */
+    .editing-hint{ font-size:12px; color:#b45309; background:#fff7ed; border:1px solid #fed7aa; padding:4px 8px; border-radius:6px; display:none; }
+    .editing-active .editing-hint{ display:inline-block; }
   </style>
 
   <!-- Fallback: försök gömma EAN även utan JS -->
@@ -63,6 +73,7 @@
   <nav class="vr-nav">
     <button class="vr-btn" onclick="location.href='#register'">Register</button>
     <button class="vr-btn" onclick="location.href='rapport.html'">Rapport</button>
+    <span class="editing-hint" id="editHint">Redigeringsläge: uppdatera och tryck Spara för att ändra posten</span>
   </nav>
 
   <h1>Vinylregister</h1>
@@ -144,7 +155,7 @@
       const b=document.createElement('div'); b.className='badge'; b.textContent=msg;
       document.body.appendChild(b); setTimeout(()=>b.remove(), 2200);
     }
-    badge('Ny version (fix för UFO)');
+    badge('Version med Redigera/Ta bort');
 
     function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),1400); }
     function storageOK(){ try{ localStorage.setItem('__vr__','1'); localStorage.removeItem('__vr__'); return true; } catch(_){ return false; } }
@@ -160,9 +171,21 @@
       Array.from(tbl.tBodies).forEach(tbody=> Array.from(tbody.rows).forEach(tr=> tr.cells[idx] && tr.cells[idx].classList.add('col-ean')));
     }
 
+    // Globalt redigeringsläge
+    let editingId = null;
+    function setEditing(on){
+      editingId = on ? editingId : null;
+      document.body.classList.toggle('editing-active', !!editingId);
+    }
+
     function renderRegisterTable(){
       const tb = $("#registerTable tbody"); if(!tb) return;
       const list = load(); tb.innerHTML = "";
+      let changed=false;
+      // se till att alla poster har id
+      for (const rec of list){ if(!rec.id){ rec.id=(crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random()); changed=true; } }
+      if (changed) save(list);
+
       const today = new Date();
       list.forEach(rec=>{
         const tr = document.createElement("tr");
@@ -180,7 +203,10 @@
           <td class="right">${ rec.purchasePrice||"" }</td>
           <td class="right">${ rec.paidPrice||"" }</td>
           <td class="right">${ margin }</td>
-          <td class="right">—</td>`;
+          <td class="right">
+            <button class="btn-small" data-act="edit" data-id="${rec.id}">Redigera</button>
+            <button class="btn-small danger" data-act="delete" data-id="${rec.id}">Ta bort</button>
+          </td>`;
         tb.appendChild(tr);
       });
       hideEANColumn(tb.closest('table'));
@@ -212,19 +238,37 @@
       list.push(clone); return list;
     }
 
+    // Spara / Uppdatera
     $("#btnSave")?.addEventListener("click", function(ev){
       ev.preventDefault();
       if (!storageOK()){ toast("Kan inte spara (privat läge?)"); return; }
       const rec = buildRecordFromForm();
-      const list = load(); mergeOrPush(list, rec); save(list);
+      const list = load();
+
+      if (editingId){
+        const idx = list.findIndex(r=> r.id===editingId);
+        if (idx>=0){
+          rec.id = editingId; // behåll id
+          list[idx] = rec;
+          save(list);
+          renderRegisterTable(); toast("Uppdaterad ✏️");
+          editingId = null; setEditing(false);
+          return;
+        }
+      }
+
+      mergeOrPush(list, rec); save(list);
       renderRegisterTable(); toast("Sparat ✅");
     });
 
+    // Rensa fälten och lämna redigeringsläge
     $("#btnClear")?.addEventListener("click", function(){
       ["artist","album","year","format","ean","purchaseDate","purchasePrice","askPrice","stockQty"].forEach(id=>{ const el=$("#"+id); if(el) el.value = (id==="stockQty")?1:""; });
       const t=$("#thumb"); if(t){ t.removeAttribute('src'); t.style.display='none'; }
+      editingId = null; setEditing(false);
     });
 
+    // Snabbsök
     $("#quickSearch")?.addEventListener("input", function(){
       const q = this.value.toLowerCase();
       $("#registerTable tbody")?.querySelectorAll("tr").forEach(tr=>{
@@ -249,7 +293,7 @@
     let lastCode = "";
     let lastAt = 0;
     let stopped = true;
-    let lookupInProgress = false; // <-- viktigt
+    let lookupInProgress = false;
 
     function setStatus(msg){ if(status) status.textContent = msg; }
     function showOverlay(){ overlay.style.display = "flex"; overlay.setAttribute('aria-hidden','false'); }
@@ -330,9 +374,9 @@
       lastCode = code; lastAt = now;
       setStatus("Hittade: " + code + " (lämna öppet om du vill skanna igen)");
       if ('vibrate' in navigator) try{ navigator.vibrate(60); }catch(_){}
-      clearMetadataFields();                  // <-- rensa tidigare metadata
+      clearMetadataFields();
       const eanEl = $("#ean"); if(eanEl) eanEl.value = code;
-      lookupInProgress = true;                // <-- blockera auto-add under lookup
+      lookupInProgress = true;
       lookupByEAN(code).finally(()=>{ lookupInProgress = false; });
     }
 
@@ -375,17 +419,17 @@
 
         setStatus("Metadata hämtad");
         toast("Metadata hämtad ✅");
-        maybeAutoAdd(); // <-- auto-add först EFTER lookup
+        maybeAutoAdd();
       }catch(err){
         setStatus("Metadata-fel");
         toast("Kunde inte hämta metadata");
       }
     }
 
-    // Auto-add: triggas på artist/album/title (inte på EAN) och blockeras om lookup pågår
+    // Auto-add: triggas på artist/album/title och blockeras om lookup pågår eller om vi är i redigeringsläge
     let lastKey='';
     function maybeAutoAdd(){
-      if (lookupInProgress) return;
+      if (lookupInProgress || editingId) return;
       if (!storageOK()) return;
       const rec = buildRecordFromForm();
       if (!(rec.ean && (rec.artist || rec.title))) return;
@@ -401,7 +445,46 @@
       if(el){ ["input","change"].forEach(evt=> el.addEventListener(evt, ()=> setTimeout(maybeAutoAdd, 150), {capture:true})); }
     });
 
-    // Reparera redan sparade poster (t.ex. om alla fått “UFO”)
+    // Åtgärder i tabellen: redigera / radera
+    document.addEventListener("click", function(e){
+      const btn = e.target.closest("button[data-act]");
+      if (!btn) return;
+      const id = btn.getAttribute("data-id");
+      const act = btn.getAttribute("data-act");
+      if (!id || !act) return;
+
+      const list = load();
+      const rec = list.find(r=> r.id===id);
+      if (!rec) { toast("Hittar inte posten"); return; }
+
+      if (act==="delete"){
+        if (!confirm("Ta bort denna post?")) return;
+        const next = list.filter(r=> r.id!==id);
+        save(next); renderRegisterTable(); toast("Raderad 🗑️");
+        return;
+      }
+
+      if (act==="edit"){
+        // fyll formuläret
+        $("#artist").value = rec.artist||"";
+        $("#album").value  = rec.title||"";
+        $("#year").value   = rec.year||"";
+        $("#format").value = rec.format||"";
+        $("#ean").value    = rec.ean||"";
+        $("#purchaseDate").value = rec.purchaseDate||"";
+        $("#purchasePrice").value= rec.purchasePrice||"";
+        $("#askPrice").value     = rec.askPrice||"";
+        $("#stockQty").value     = rec.stockQty||1;
+        const img=$("#thumb");
+        if (img){ if(rec.thumbUrl){ img.src=rec.thumbUrl; img.style.display=''; } else { img.removeAttribute('src'); img.style.display='none'; } }
+        editingId = rec.id; setEditing(true);
+        document.getElementById("vr-meta").scrollIntoView({behavior:"smooth", block:"start"});
+        toast("Redigerar posten ✏️");
+        return;
+      }
+    }, true);
+
+    // Reparera sparade poster (uppdaterar saknad metadata)
     $("#btnRepair")?.addEventListener("click", async function(){
       if (!confirm("Reparera poster med tom/konstig metadata (upp till 25 st)?")) return;
       let list = load(); let changed=0;
@@ -436,6 +519,7 @@
       toast("Reparerade: "+changed);
     });
 
+    /* ===================== INIT ===================== */
     function installDemo(){
       const params=new URLSearchParams(location.search);
       if(!params.has("demo")) return;
