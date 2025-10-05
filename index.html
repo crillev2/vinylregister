@@ -156,6 +156,145 @@
   document.addEventListener("DOMContentLoaded", ()=> setTimeout(maybeAutoAdd, 2000));
 })();
 </script>
+<script>
+/* ===== VR FIX v5: säkert render + auto-add + unhide ===== */
+(function(){ 'use strict';
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+  const n=v=>Number(v||0)||0;
+
+  /* 1) Rädda fram registret om något gömts tidigare */
+  function unhideRegister(){
+    ['#register','#registerTable'].forEach(sel=>{
+      $$(sel).forEach(root=>{
+        root.querySelectorAll('[style*="display"]').forEach(el=>{
+          if(!el.classList.contains('col-ean')) el.style.removeProperty('display');
+        });
+      });
+    });
+  }
+
+  /* 2) Hitta tabellens tbody även om id saknas/ändrats */
+  function getTbody(){
+    let tb = $('#registerTable tbody');
+    if (tb) return tb;
+    for (const t of $$('table')){
+      const head = t.tHead && t.tHead.rows[0]; if(!head) continue;
+      const labels = Array.from(head.cells).map(c=>(c.textContent||'').trim().toLowerCase());
+      if (labels.includes('artist') && (labels.includes('album') || labels.includes('titel'))){
+        return t.tBodies[0] || t.createTBody();
+      }
+    }
+    return null;
+  }
+
+  /* 3) Storage helpers */
+  function load(){ try{ const raw=localStorage.getItem('vinyl_records'); const a=raw?JSON.parse(raw):[]; return Array.isArray(a)?a:[]; }catch(_){ return []; } }
+  function save(a){ try{ localStorage.setItem('vinyl_records', JSON.stringify(a)); }catch(_){ } }
+
+  function daysBetween(a,b){ a=new Date(a); b=new Date(b); if(isNaN(a)||isNaN(b)) return ''; return Math.floor((b-a)/86400000); }
+
+  /* 4) Robust render som alltid funkar */
+  function render(){
+    unhideRegister();
+    const tb=getTbody(); if(!tb) return;
+    const list=load(); tb.innerHTML='';
+    const today=new Date();
+    for (const rec of list){
+      const tr=document.createElement('tr');
+      const dgl=rec.purchaseDate?daysBetween(rec.purchaseDate,today):'';
+      const margin=(n(rec.paidPrice)&&n(rec.purchasePrice))?(n(rec.paidPrice)-n(rec.purchasePrice)):'';
+      const img = rec.thumbUrl ? `<img src="${rec.thumbUrl}" class="vr-thumb" alt="" onerror="this.remove()">` : '';
+      tr.innerHTML = `
+        <td>${img}</td>
+        <td>${rec.artist||''}</td>
+        <td>${rec.title||''}</td>
+        <td>${rec.year||''}</td>
+        <td>${rec.format||''}</td>
+        <td class="col-ean">${rec.ean||''}</td>
+        <td class="right">${dgl}</td>
+        <td class="right">${rec.purchasePrice||''}</td>
+        <td class="right">${rec.paidPrice||''}</td>
+        <td class="right">${margin}</td>
+        <td class="right">—</td>`;
+      tb.appendChild(tr);
+    }
+    // se till att EAN-kolumnen är dold
+    const tbl = tb.closest('table');
+    if (tbl && tbl.tHead){
+      const idx = Array.from(tbl.tHead.rows[0].cells)
+        .findIndex(th => th.getAttribute('data-col')==='ean' || (th.textContent||'').trim().toLowerCase()==='ean');
+      if (idx>=0){
+        tbl.tHead.rows[0].cells[idx].classList.add('col-ean');
+        Array.from(tb.rows).forEach(r=>{ if(r.cells[idx]) r.cells[idx].classList.add('col-ean'); });
+      }
+    }
+  }
+  window.renderRegisterTable = render; // om sidan vill kalla den
+
+  /* 5) Bygg post från fälten på skärmen */
+  function buildFromForm(){
+    const get=id=> (document.getElementById(id)||document.querySelector(`[name="${id}"]`))?.value?.trim()||'';
+    const img=$('#thumb'); const url=img && img.src ? img.src : '';
+    return {
+      id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
+      artist: get('artist') || get('Artist') || $('#scan-artist')?.textContent || '',
+      title:  get('album')  || get('title')  || get('Album') || $('#scan-title')?.textContent || '',
+      year:   get('year')   || get('År'),
+      format: get('format') || get('Format'),
+      ean:    get('ean')    || get('EAN')    || get('barcode') || $('#scan-ean')?.textContent || '',
+      purchaseDate:  get('purchaseDate') || get('inkopsdatum') || get('Inköpsdatum'),
+      purchasePrice: Number(get('purchasePrice')||0) || 0,
+      askPrice:      Number(get('askPrice')||0)      || 0,
+      paidPrice:     Number(get('paidPrice')||0)     || 0,
+      stockQty:      Number(get('stockQty')||get('antal')||1) || 1,
+      thumbUrl: url
+    };
+  }
+
+  /* 6) Auto-lägg till EN gång när metadata blivit komplett */
+  let lastSavedKey = '';
+  function addCurrentOnce(){
+    const rec = buildFromForm();
+    if (!(rec.ean && (rec.artist || rec.title))) return;
+    const key = rec.ean + '|' + rec.artist + '|' + rec.title;
+    if (key === lastSavedKey) return; // undvik dubletter
+    const list = load();
+    // slå ihop om exakt samma EAN+artist+titel redan finns
+    const same = list.find(r=> r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+    if (same){ same.stockQty = (Number(same.stockQty)||0) + (Number(rec.stockQty)||1); }
+    else { list.push(structuredClone?structuredClone(rec):JSON.parse(JSON.stringify(rec))); }
+    save(list);
+    lastSavedKey = key;
+    render();
+    // kvitto
+    const t=document.createElement('div');
+    t.textContent='Tillagd i register ✅';
+    Object.assign(t.style,{position:'fixed',right:'12px',bottom:'12px',background:'#eef7ff',border:'1px solid #bcd',padding:'8px 12px',borderRadius:'8px',zIndex:99999});
+    document.body.appendChild(t); setTimeout(()=>t.remove(),1400);
+  }
+
+  // lyssna på ändringar i de vanligaste fälten
+  ['ean','artist','album','title'].forEach(id=>{
+    const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
+    if (el){
+      ['input','change'].forEach(evt=>{
+        el.addEventListener(evt, ()=>{ clearTimeout(addCurrentOnce._t); addCurrentOnce._t=setTimeout(addCurrentOnce, 250); }, {capture:true});
+      });
+    }
+  });
+
+  /* 7) Rendera automatiskt när något skriver vinyl_records */
+  try{
+    const _set = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = function(k,v){ const r=_set(k,v); if(k==='vinyl_records') try{ render(); }catch(_){ } return r; };
+  }catch(_){}
+
+  /* 8) Första render + extra försök (mobil) */
+  document.addEventListener('DOMContentLoaded', ()=>{ render(); setTimeout(render,600); setTimeout(render,1800); });
+
+})();
+</script>
 
   <body>
 
