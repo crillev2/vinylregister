@@ -336,7 +336,7 @@ document.addEventListener('DOMContentLoaded', function(){
   const iv = setInterval(()=>{ ensureRecordsWrapped(); if(--tries<=0) clearInterval(iv); }, 300);
 
   // ---- 3) (Plan B) Ta över "Spara" / submit – AV som standard
-  const FORCE_TAKEOVER = false; // sätt true om du vill att denna tar över sparandet
+  const FORCE_TAKEOVER = true; // sätt true om du vill att denna tar över sparandet
 
   function buildRecordFromDOM(){
     const get = sel => (document.querySelector(sel)||{}).value || "";
