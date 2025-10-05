@@ -69,6 +69,200 @@ document.addEventListener('DOMContentLoaded', function(){
   });
 });
 </script>
+<script>
+/* ===== Vinylregister – HOTFIX v1 (drop-in) =====
+   - Flyttar prisfälten till metadata-sektionen
+   - Spara bygger alltid ny record från aktuella fält
+   - Skonsam: rör inte din befintliga JS mer än att "ta över" spara-knappen
+*/
+(function(){
+  "use strict";
+
+  // ---- små helpers
+  const $  = (sel,root=document) => root.querySelector(sel);
+  const $$ = (sel,root=document) => Array.from(root.querySelectorAll(sel));
+  const num = v => Number(v||0)||0;
+
+  // Hämta värde via id eller name
+  function valAny(...ids){
+    for (const id of ids){
+      const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
+      if (el) return el.value;
+    }
+    return "";
+  }
+  // Hämta src på ev. thumb
+  function thumbSrc(){
+    const el = $("#thumb") || $(".thumb img") || $("img[data-role='thumb']");
+    return el ? el.src : "";
+  }
+
+  // ---- 1) Lägg/ flytta prisfält till metadata
+  function ensurePriceFieldsInMetadata(){
+    const host = $(".metadata-grid") || $("#metadata") || $("form") || document.body;
+
+    function ensureOne(id, label){
+      let input = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
+      let wrap  = input ? input.closest("label.field") : null;
+
+      if (!input){
+        // skapa om den saknas
+        wrap  = document.createElement("label");
+        wrap.className = "field";
+        const span = document.createElement("span"); span.textContent = label;
+        input = document.createElement("input");
+        input.type = "number"; input.step = "1"; input.id = id; input.name = id;
+        input.className = "manual-field";
+        wrap.append(span, input);
+      }else{
+        // flytta befintlig input till en label.field
+        if (!wrap){
+          wrap = document.createElement("label");
+          wrap.className = "field";
+          const span = document.createElement("span"); span.textContent = label;
+          wrap.append(span, input);
+        }
+      }
+      // Om wrap inte redan ligger i host → flytta
+      if (!host.contains(wrap)) host.appendChild(wrap);
+    }
+
+    ensureOne("purchasePrice", "Inköpspris");
+    ensureOne("askPrice",      "Begärt pris");
+    // paidPrice visas normalt vid försäljning, men om det finns: flytta upp så det inte hamnar under listan
+    const paid = document.getElementById("paidPrice") || document.querySelector(`[name="paidPrice"]`);
+    if (paid){
+      let wrap = paid.closest("label.field");
+      if (!wrap){
+        wrap = document.createElement("label");
+        wrap.className = "field";
+        const span = document.createElement("span"); span.textContent = "Faktiskt betalt";
+        wrap.append(span, paid);
+      }
+      if (!host.contains(wrap)) host.appendChild(wrap);
+      paid.classList.add("manual-field");
+    }
+  }
+
+  // ---- 2) Bygg alltid en NY record från det som står i formuläret
+  function buildRecordFromForm(){
+    const record = {
+      id:           (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+      artist:       valAny("artist","Artist"),
+      title:        valAny("album","title","Album","Titel"),
+      year:         valAny("year","År"),
+      format:       valAny("format","Format"),
+      ean:          valAny("ean","EAN","barcode"),
+      purchaseDate: valAny("purchaseDate","inkopsdatum","Inköpsdatum"),
+      purchasePrice:num(valAny("purchasePrice")),
+      askPrice:     num(valAny("askPrice")),
+      paidPrice:    num(valAny("paidPrice")),
+      stockQty:     num(valAny("stockQty","antal")) || 1,
+      thumbUrl:     thumbSrc()
+    };
+    return record;
+  }
+
+  // Läs/skriv “records” – använder din globala om den finns, annars localStorage
+  function loadRecords(){
+    if (Array.isArray(window.records)) return window.records;
+    try{
+      const raw = localStorage.getItem("vinyl_records");
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    }catch{ return []; }
+  }
+  function saveRecords(arr){
+    // uppdatera global om den finns
+    if (Array.isArray(window.records)) window.records = arr;
+    // din app kanske har persist-funktion
+    try{
+      if (typeof window.persistRecords === "function"){ window.persistRecords(arr); return; }
+    }catch{}
+    // fallback: localStorage
+    try{ localStorage.setItem("vinyl_records", JSON.stringify(arr)); }catch{}
+  }
+
+  // De-dupe: samma ean+artist+title -> öka lager istället
+  function mergeOrPush(records, rec){
+    const hit = records.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+    if (hit){ hit.stockQty = num(hit.stockQty) + (num(rec.stockQty) || 1); return records; }
+    records.push(rec); return records;
+  }
+
+  // ---- 3) Ta över spara-knappen försiktigt
+  function hijackSave(){
+    const saveSelectors = '#btnSave, .btn-save, .save, button[data-action="save"], button[onclick*="save"], input[type="submit"]';
+    document.addEventListener("click", function(ev){
+      const el = ev.target.closest(saveSelectors);
+      if (!el) return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      const rec = buildRecordFromForm();
+      // console.log("SPARAR (patch):", rec);
+
+      const list = loadRecords();
+      mergeOrPush(list, rec);
+      saveRecords(list);
+
+      // uppdatera UI om render-funktion finns, annars uppdatera tabellen grovt
+      try{
+        if (typeof window.renderRegisterTable === "function"){ window.renderRegisterTable(); }
+        else {
+          // enkel append i #registerTable om den finns
+          const tb = document.querySelector("#registerTable tbody");
+          if (tb){
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td><img src="${rec.thumbUrl||""}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #ddd"></td>
+              <td>${rec.artist||""}</td>
+              <td>${rec.title||""}</td>
+              <td>${rec.year||""}</td>
+              <td>${rec.format||""}</td>
+              <td class="col-ean">${rec.ean||""}</td>
+              <td class="right"></td>
+              <td class="right">${rec.purchasePrice||""}</td>
+              <td class="right">${rec.paidPrice||""}</td>
+              <td class="right">${rec.paidPrice && rec.purchasePrice ? (rec.paidPrice - rec.purchasePrice) : ""}</td>
+              <td class="right">—</td>
+            `;
+            tb.appendChild(tr);
+          }
+        }
+      }catch{}
+
+      // rensa bara antal (valfritt)
+      const qtyEl = document.getElementById("stockQty") || document.querySelector('[name="stockQty"]');
+      if (qtyEl) qtyEl.value = "";
+
+      // visa en liten bekräftelse
+      try{
+        const note = document.createElement("div");
+        note.textContent = "Sparat ✅";
+        Object.assign(note.style, {position:"fixed",right:"12px",bottom:"12px",background:"#eef7ff",border:"1px solid #bcd",
+                                   padding:"8px 12px",borderRadius:"8px",zIndex:99999});
+        document.body.appendChild(note);
+        setTimeout(()=> note.remove(), 1500);
+      }catch{}
+    }, true); // capture=true för att hinna före annan hantering
+  }
+
+  // ---- Run
+  document.addEventListener("DOMContentLoaded", function(){
+    ensurePriceFieldsInMetadata();
+    hijackSave();
+  });
+
+  // om din app bygger om DOM senare (t.ex. efter scanning), gör om placering
+  if (window.MutationObserver){
+    new MutationObserver(()=>{
+      ensurePriceFieldsInMetadata();
+    }).observe(document.body, {childList:true, subtree:true});
+  }
+})();
+</script>
 
 <body>
   <script src="js/auto_apply_v3.js?v=6"></script>
