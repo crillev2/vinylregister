@@ -52,6 +52,17 @@
     body.no-scroll{overflow:hidden}
   </style>
 </head>
+  <!-- RESCUE: ta bort ev. tidigare display:none på element (men låt EAN-fix vara kvar) -->
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('[style*="display: none"]').forEach(function(el){
+    if (!el.classList.contains('col-ean')) {
+      el.style.removeProperty('display');
+    }
+  });
+});
+</script>
+
 <body>
   <script src="js/auto_apply_v3.js?v=6"></script>
   <header>
