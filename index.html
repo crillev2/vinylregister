@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Färsk index</title>
+  <title>Vinylregister – Scanner</title>
   <style>
-    :root { --fg:#111; --muted:#666; --line:#e5e5e5; --bg:#fff; --chip:#f6f6f6; }
+    :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; --chip:#f6f6f6; }
     * { box-sizing: border-box; }
     body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--fg); background:var(--bg); margin:16px; }
     h1{ margin: 0 0 12px; }
@@ -17,7 +17,7 @@
     .field span{ font-size:0.9rem; color:var(--muted); }
     .manual-field{ background:#f8fbff; border:1px solid #dbe7ff; border-radius:8px; padding:8px; }
     .manual-field:focus{ outline:2px solid #9ec5ff; background:#fff; }
-    .row-actions{ display:flex; gap:8px; justify-content:flex-end; }
+    .row-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .vr-thumb{ width:48px; height:48px; object-fit:cover; border-radius:6px; border:1px solid #ddd; }
     .wrap{ border:1px solid var(--line); border-radius:12px; padding:12px; margin:12px 0; }
     .muted{ color:var(--muted); }
@@ -29,12 +29,32 @@
     .col-ean{ display:none !important; } /* döljer EAN-kolumnen */
     #quickSearch{ width:100%; margin:8px 0 12px; }
     @media (max-width: 900px){ .metadata-grid{ grid-template-columns:1fr; } }
+
+    /* Scanner overlay */
+    .scanner-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:none; align-items:center; justify-content:center; z-index:99999; }
+    .scanner-card{ width:min(640px, 96vw); background:#000; border-radius:16px; overflow:hidden; border:1px solid #333; }
+    .scanner-video{ width:100%; max-height:60vh; background:#000; }
+    .scanner-bar{ display:flex; gap:8px; padding:8px; background:#111; color:#fff; align-items:center; justify-content:space-between; }
+    .scanner-status{ font-size:.9rem; opacity:.8; }
   </style>
+
   <!-- Fallback: göm EAN även utan JS (EAN är kolumn 6) -->
   <style>
     table:has(th[data-col="ean"]) th[data-col="ean"],
     table:has(th[data-col="ean"]) tbody td:nth-child(6) { display:none !important; }
   </style>
+
+  <!-- ZXing fallback (laddas endast om BarcodeDetector saknas) -->
+  <script>
+    (function(){
+      if (!('BarcodeDetector' in window)) {
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
+        s.defer = true;
+        document.head.appendChild(s);
+      }
+    })();
+  </script>
 </head>
 <body>
 
@@ -52,14 +72,15 @@
       <label class="field"><span>Album</span><input id="album" class="manual-field" type="text" placeholder="Ex. Burn"></label>
       <label class="field"><span>År</span><input id="year" class="manual-field" type="number" step="1"></label>
       <label class="field"><span>Format</span><input id="format" class="manual-field" type="text" placeholder="LP/EP/12&quot;"></label>
-      <label class="field"><span>EAN</span><input id="ean" class="manual-field" type="text" placeholder="Streckkod"></label>
+      <label class="field"><span>EAN</span><input id="ean" class="manual-field" type="text" placeholder="Skannas eller skrivs in"></label>
       <label class="field"><span>Inköpsdatum</span><input id="purchaseDate" class="manual-field" type="date"></label>
       <label class="field"><span>Inköpspris</span><input id="purchasePrice" class="manual-field" type="number" step="1"></label>
       <label class="field"><span>Begärt pris</span><input id="askPrice" class="manual-field" type="number" step="1"></label>
       <label class="field"><span>Antal</span><input id="stockQty" class="manual-field" type="number" step="1" value="1"></label>
       <label class="field"><span>Omslag</span><img id="thumb" class="vr-thumb" alt="cover"></label>
     </div>
-    <div style="display:flex; gap:8px; align-items:center;">
+    <div class="row-actions">
+      <button class="vr-btn" id="btnScan">Skanna streckkod</button>
       <button class="vr-btn" id="btnSave">Spara</button>
       <span class="muted">Tips: öppna sidan med <code>?demo=1</code> för testposter.</span>
     </div>
@@ -90,85 +111,64 @@
     </div>
   </div>
 
-  <!-- === ALL-IN-ONE skript (render, spara, EAN-dölj, snabbsök, demo) === -->
+  <!-- Scanner overlay -->
+  <div class="scanner-overlay" id="scannerOverlay" aria-hidden="true">
+    <div class="scanner-card">
+      <video id="scannerVideo" class="scanner-video" autoplay playsinline></video>
+      <div class="scanner-bar">
+        <div class="scanner-status" id="scannerStatus">Initierar kamera…</div>
+        <div style="display:flex; gap:8px;">
+          <button class="vr-btn" id="btnTorch" title="Ficklampa">Ficklampa</button>
+          <button class="vr-btn" id="btnCloseScanner">Stäng</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
   (function(){
     "use strict";
 
-    /* kvitto att rätt fil körs */
-    try{
-      const tag = document.createElement('div');
-      tag.textContent = "Ny index aktiv";
-      Object.assign(tag.style, {position:'fixed',left:'12px',bottom:'12px',background:'#F0FFF5',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
-      document.body.appendChild(tag);
-      setTimeout(()=>tag.remove(), 1200);
-    }catch(e){}
+    /* --- UI helpers --- */
+    const $ = (s,r=document)=>r.querySelector(s);
+    const n = v => Number(v||0)||0;
 
-    const $  = (s,r=document)=>r.querySelector(s);
-    const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
-    const n  = v => Number(v||0)||0;
+    /* --- data store --- */
+    function loadList(){
+      try{ const raw=localStorage.getItem("vinyl_records"); const arr=raw?JSON.parse(raw):[]; return Array.isArray(arr)?arr:[]; }catch(_){ return []; }
+    }
+    function saveList(list){ try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){ } }
 
+    /* --- render register --- */
     function daysBetween(d1, d2){
       const a = (d1 instanceof Date) ? d1 : new Date(d1);
       const b = (d2 instanceof Date) ? d2 : new Date(d2);
       if(isNaN(a) || isNaN(b)) return "";
       return Math.floor(Math.abs(b-a)/(1000*60*60*24));
     }
-
-    function loadList(){
-      try{
-        const raw = localStorage.getItem("vinyl_records");
-        const arr = raw ? JSON.parse(raw) : [];
-        return Array.isArray(arr) ? arr : [];
-      }catch(_){ return []; }
-    }
-    function saveList(list){
-      try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){}
-    }
-
     function renderRegisterTable(){
-      const tb = $("#registerTable tbody");
-      if(!tb) return;
+      const tb = $("#registerTable tbody"); if(!tb) return;
       const list = loadList();
       tb.innerHTML = "";
       const today = new Date();
-
       list.forEach(rec=>{
         const tr = document.createElement("tr");
         const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : "";
         const margin = (n(rec.paidPrice) && n(rec.purchasePrice)) ? (n(rec.paidPrice)-n(rec.purchasePrice)) : "";
-
-        tr.innerHTML = \`
-          <td>\${ rec.thumbUrl ? \`<img src="\${rec.thumbUrl}" class="vr-thumb" alt="">\` : "" }</td>
-          <td>\${ rec.artist||"" }</td>
-          <td>\${ rec.title||"" }</td>
-          <td>\${ rec.year||"" }</td>
-          <td>\${ rec.format||"" }</td>
-          <td class="col-ean">\${ rec.ean||"" }</td>
-          <td class="right">\${ dgl }</td>
-          <td class="right">\${ rec.purchasePrice||"" }</td>
-          <td class="right">\${ rec.paidPrice||"" }</td>
-          <td class="right">\${ margin }</td>
-          <td class="right">—</td>
-        ";
+        tr.innerHTML = [
+          '<td>', (rec.thumbUrl? '<img src="'+rec.thumbUrl+'" class="vr-thumb" alt="">' : ''), '</td>',
+          '<td>', (rec.artist||''), '</td>',
+          '<td>', (rec.title||''), '</td>',
+          '<td>', (rec.year||''), '</td>',
+          '<td>', (rec.format||''), '</td>',
+          '<td class="col-ean">', (rec.ean||''), '</td>',
+          '<td class="right">', dgl, '</td>',
+          '<td class="right">', (rec.purchasePrice||''), '</td>',
+          '<td class="right">', (rec.paidPrice||''), '</td>',
+          '<td class="right">', (margin||''), '</td>',
+          '<td class="right">—</td>'
+        ].join('');
         tb.appendChild(tr);
-      });
-
-      hideEANColumn();
-    }
-
-    function hideEANColumn(){
-      const tbl = $("#registerTable");
-      if(!tbl || !tbl.tHead || !tbl.tHead.rows.length) return;
-      const headers = Array.from(tbl.tHead.rows[0].cells);
-      let idx = headers.findIndex(th => th.getAttribute("data-col")==="ean" || (th.textContent||"").trim().toLowerCase()==="ean");
-      if(idx<0) return;
-      headers[idx].classList.add("col-ean");
-      Array.from(tbl.tBodies).forEach(tbody=>{
-        Array.from(tbody.rows).forEach(tr=>{
-          const c = tr.cells[idx];
-          if(c) c.classList.add("col-ean");
-        });
       });
     }
 
@@ -188,68 +188,153 @@
         thumbUrl: $("#thumb")?.src || ""
       };
     }
-
     function mergeOrPush(list, rec){
       const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
       if (same){ same.stockQty = (n(same.stockQty) + (rec.stockQty||1)); return list; }
       const clone = (structuredClone ? structuredClone(rec) : JSON.parse(JSON.stringify(rec)));
-      list.push(clone);
-      return list;
+      list.push(clone); return list;
     }
 
-    function wireSave(){
-      const btn = $("#btnSave");
-      if(!btn) return;
-      btn.addEventListener("click", function(ev){
-        ev.preventDefault();
-        const rec = buildRecordFromForm();
-        const list = loadList();
-        mergeOrPush(list, rec);
-        saveList(list);
-        renderRegisterTable();
-        try{
-          const note = document.createElement("div");
-          note.textContent = "Sparat ✅";
-          Object.assign(note.style,{position:"fixed",right:"12px",bottom:"12px",background:"#eef7ff",border:"1px solid #bcd",padding:"8px 12px",borderRadius:"8px",zIndex:99999});
-          document.body.appendChild(note); setTimeout(()=>note.remove(), 1200);
-        }catch(_){}
-      });
-    }
-
-    function wireSearch(){
-      const box = $("#quickSearch");
-      const tb  = $("#registerTable tbody");
-      if(!box || !tb) return;
-      box.addEventListener("input", function(){
-        const q = this.value.toLowerCase();
-        tb.querySelectorAll("tr").forEach(tr=>{
-          tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none";
-        });
-      });
-    }
-
-    function installDemoIfRequested(){
-      const params = new URLSearchParams(location.search);
-      if(!params.has("demo")) return;
-      const demo = [
-        { id:"1", artist:"Deep Purple", title:"Burn", year:"1974", format:"LP", ean:"123", purchaseDate:"2025-06-01", purchasePrice:80, askPrice:120, paidPrice:100, stockQty:1, thumbUrl:"" },
-        { id:"2", artist:"Led Zeppelin", title:"IV", year:"1971", format:"LP", ean:"456", purchaseDate:"2025-04-10", purchasePrice:120, askPrice:180, paidPrice:0, stockQty:1, thumbUrl:"" },
-        { id:"3", artist:"Dire Straits", title:"Sultans of Swing", year:"1978", format:"7\"", ean:"789", purchaseDate:"2025-03-15", purchasePrice:40, askPrice:90, paidPrice:0, stockQty:3, thumbUrl:"" }
-      ];
-      saveList(demo);
-    }
-
-    document.addEventListener("DOMContentLoaded", function(){
-      installDemoIfRequested();
-      wireSave();
-      wireSearch();
+    $("#btnSave")?.addEventListener("click", function(ev){
+      ev.preventDefault();
+      const rec = buildRecordFromForm();
+      const list = loadList(); mergeOrPush(list, rec); saveList(list);
       renderRegisterTable();
     });
 
-    if(window.MutationObserver){
-      new MutationObserver(()=> hideEANColumn())
-        .observe(document.body, {childList:true, subtree:true});
+    $("#quickSearch")?.addEventListener("input", function(){
+      const q = this.value.toLowerCase();
+      $("#registerTable tbody")?.querySelectorAll("tr").forEach(tr=>{
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+    });
+
+    /* --- install demo if requested --- */
+    (function(){
+      const params=new URLSearchParams(location.search);
+      if(!params.has("demo")) return;
+      const demo=[
+        { id:"1", artist:"Deep Purple", title:"Burn", year:"1974", format:"LP", ean:"1234567890123", purchaseDate:"2025-06-01", purchasePrice:80, askPrice:120, paidPrice:100, stockQty:1, thumbUrl:"" },
+        { id:"2", artist:"Led Zeppelin", title:"IV", year:"1971", format:"LP", ean:"2345678901234", purchaseDate:"2025-04-10", purchasePrice:120, askPrice:180, paidPrice:0, stockQty:1, thumbUrl:"" }
+      ];
+      saveList(demo);
+    })();
+
+    /* ===================== BARCODE SCANNER ===================== */
+    const overlay = $("#scannerOverlay");
+    const video   = $("#scannerVideo");
+    const status  = $("#scannerStatus");
+    const btnScan = $("#btnScan");
+    const btnClose= $("#btnCloseScanner");
+    const btnTorch= $("#btnTorch");
+
+    let stream = null;
+    let rafId = 0;
+    let reader = null; // ZXing fallback
+    let useBarcodeDetector = 'BarcodeDetector' in window;
+    let detector = null;
+    let stopped = true;
+
+    function setStatus(msg){ if(status) status.textContent = msg; }
+    function showOverlay(){ overlay.style.display = "flex"; overlay.setAttribute('aria-hidden','false'); }
+    function hideOverlay(){ overlay.style.display = "none"; overlay.setAttribute('aria-hidden','true'); }
+
+    async function startScanner(){
+      stopped = false;
+      showOverlay();
+      setStatus("Startar kamera…");
+
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+        video.srcObject = stream;
+        await video.play();
+      }catch(e){
+        setStatus("Kunde inte starta kamera: " + e.message);
+        return;
+      }
+
+      if(useBarcodeDetector){
+        try{
+          detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128'] });
+        }catch(_){
+          useBarcodeDetector = false;
+        }
+      }
+
+      if(useBarcodeDetector){
+        setStatus("Skannar (kamera)…");
+        detectLoop();
+      }else{
+        // ZXing fallback
+        setStatus("Skannar (ZXing)…");
+        const tryStartZX = ()=>{
+          if (window.ZXing && window.ZXing.BrowserMultiFormatReader){
+            reader = new window.ZXing.BrowserMultiFormatReader();
+            reader.decodeFromVideoDevice(null, video, (result, err) => {
+              if (result && !stopped){
+                onDetected(result.getText());
+              }
+            });
+          }else{
+            setTimeout(tryStartZX, 300);
+          }
+        };
+        tryStartZX();
+      }
     }
+
+    function stopStream(){
+      try{
+        if(reader && reader.reset){ reader.reset(); }
+        if(rafId) cancelAnimationFrame(rafId);
+        if(stream){ stream.getTracks().forEach(t=>t.stop()); }
+      }catch(_){}
+      stream = null; reader = null; detector = null; rafId = 0;
+    }
+
+    function closeScanner(){
+      stopped = true;
+      stopStream();
+      hideOverlay();
+    }
+
+    async function detectLoop(){
+      if(stopped) return;
+      try{
+        const results = await detector.detect(video);
+        if(results && results.length){
+          const raw = results[0].rawValue || results[0].rawValueText || "";
+          if(raw){ onDetected(raw); return; }
+        }
+      }catch(_){ /* ignore */ }
+      rafId = requestAnimationFrame(detectLoop);
+    }
+
+    async function toggleTorch(){
+      if(!stream) return;
+      const track = stream.getVideoTracks()[0];
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      if(!caps.torch) { setStatus("Ficklampa stöds ej"); return; }
+      const settings = track.getSettings();
+      const on = !settings.torch;
+      try { await track.applyConstraints({ advanced: [{ torch: on }] }); setStatus(on ? "Ficklampa: på" : "Ficklampa: av"); }
+      catch(e){ setStatus("Kunde inte toggla ficklampa"); }
+    }
+
+    function onDetected(code){
+      $("#ean").value = code;
+      document.dispatchEvent(new CustomEvent("ean-scanned", { detail: { ean: code } }));
+      setStatus("Hittade: " + code);
+      // stäng efter kort delay
+      setTimeout(closeScanner, 250);
+    }
+
+    btnScan?.addEventListener("click", startScanner);
+    btnClose?.addEventListener("click", closeScanner);
+    btnTorch?.addEventListener("click", toggleTorch);
+
+    /* init */
+    document.addEventListener("DOMContentLoaded", renderRegisterTable);
   })();
   </script>
 
