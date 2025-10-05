@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <html lang="sv">
 <head>
+  <style>
+  /* Om tabellen har en EAN-header, göm den headern + kolumnen */
+  table:has(th[data-col="ean"]) th[data-col="ean"],
+  table:has(th[data-col="ean"]) tbody td:nth-child(6) {
+    display: none !important;
+  }
+</style>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vinylregister – Android skanner + Pris & Rapport (låst vänster)</title>
