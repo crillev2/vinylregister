@@ -348,6 +348,265 @@ document.addEventListener('DOMContentLoaded', function(){
   }, 300);
 })();
 </script>
+<!-- === AUTO-PATCH (behåll gärna denna rad om du redan har den) === -->
+<script src="js/auto_apply_v3.js?v=9"></script>
+
+<!-- === HOTFIX v3 – placering av prisfält + korrekt sparande (drop-in) === -->
+<script>
+(function(){
+  "use strict";
+
+  /* ========= visuellt kvitto ========= */
+  try{
+    const tag = document.createElement('div');
+    tag.textContent = "Patch v3 aktiv";
+    Object.assign(tag.style, {position:'fixed',left:'12px',bottom:'12px',background:'#F5FFF0',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
+    document.body.appendChild(tag);
+    setTimeout(()=>tag.remove(), 1200);
+  }catch(e){}
+
+  /* ========= hjälpare ========= */
+  const $  = (s,r=document)=>r.querySelector(s);
+  const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+  const n  = v => Number(v||0)||0;
+
+  function cloneDeep(obj){
+    try{ return structuredClone(obj); }catch(_){
+      try{ return JSON.parse(JSON.stringify(obj)); }catch(__){ return Object.assign({}, obj); }
+    }
+  }
+
+  /* ========= hitta registertabell ========= */
+  function getRegisterTable(){
+    return $("#registerTable") ||
+           $$("table").find(t=>{
+             const ths = t.tHead ? Array.from(t.tHead.rows[0].cells).map(c=> (c.textContent||"").toLowerCase()) : [];
+             return ths.includes("artist") && (ths.includes("album") || ths.includes("titel"));
+           }) ||
+           null;
+  }
+
+  /* ========= skapa en tydlig metadata-yta före tabellen och flytta fält ========= */
+  function ensureMetaSectionAndMoveFields(){
+    const tbl = getRegisterTable();
+    if(!tbl) return;
+
+    // skapa host före tabellen
+    let host = $("#vr-meta");
+    if(!host){
+      host = document.createElement("div");
+      host.id = "vr-meta";
+      host.className = "metadata-grid";
+      tbl.parentNode.insertBefore(host, tbl);
+    }
+
+    function moveOrCreate(id, label, type, want=true){
+      if(!want) return null;
+      // om rätt wrapper redan finns – återanvänd
+      let wrap = document.getElementById("vr-wrap-"+id);
+      if(!wrap){
+        wrap = document.createElement("label");
+        wrap.id = "vr-wrap-"+id;
+        wrap.className = "field";
+        const span = document.createElement("span");
+        span.textContent = label;
+        wrap.appendChild(span);
+        host.appendChild(wrap);
+      }
+      // flytta befintlig input om den finns, annars skapa
+      let input = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
+      if(input){
+        if(!wrap.contains(input)) wrap.appendChild(input);
+      }else{
+        input = document.createElement("input");
+        input.type = type;
+        if(type==="number") input.step = "1";
+        input.id = id;
+        input.name = id;
+        wrap.appendChild(input);
+      }
+      input.classList.add("manual-field");
+      return input;
+    }
+
+    // Vi vill ha dessa fält i metadata:
+    moveOrCreate("purchasePrice","Inköpspris","number", true);
+    moveOrCreate("askPrice","Begärt pris","number", true);
+    moveOrCreate("purchaseDate","Inköpsdatum","date", true);
+    // paidPrice visas normalt vid försäljning, inte här. Men om den finns – flytta upp så den inte hamnar under listan.
+    moveOrCreate("paidPrice","Faktiskt betalt","number", !!document.getElementById("paidPrice") || !!document.querySelector('[name="paidPrice"]'));
+
+    // Städa bort ev. DUBLETTER som råkat hamna under tabellen
+    // (ta bara bort extra wrappers/inputs som ligger efter tabellen)
+    let el = tbl.nextElementSibling;
+    while(el){
+      ["purchasePrice","askPrice","paidPrice","purchaseDate"].forEach(id=>{
+        const stray = el.querySelector && (el.querySelector("#"+id) || el.querySelector(`[name="${id}"]`));
+        if(stray){
+          const w = stray.closest("label.field");
+          if(w && !host.contains(w)) w.remove();
+          else if(!host.contains(stray)) stray.remove();
+        }
+      });
+      el = el.nextElementSibling;
+    }
+  }
+
+  /* ========= läs fält och bygg post från skärmen ========= */
+  function getVal(...ids){
+    for(const id of ids){
+      const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
+      if(el && (el.value ?? "") !== "") return el.value;
+    }
+    return "";
+  }
+  function getText(...sels){
+    for(const s of sels){
+      const el = document.querySelector(s);
+      if(el && (el.textContent ?? "") !== "") return el.textContent;
+    }
+    return "";
+  }
+  function getThumb(){
+    const el = $("#thumb") || $(".thumb img") || $("img[data-role='thumb']");
+    return el ? el.src : "";
+  }
+
+  function buildRecordFromDOM(){
+    return {
+      id: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+      artist: getVal("artist","Artist") || getText("#scan-artist"),
+      title:  getVal("album","title","Album","Titel") || getText("#scan-title"),
+      year:   getVal("year","År"),
+      format: getVal("format","Format"),
+      ean:    getVal("ean","EAN","barcode") || getText("#scan-ean"),
+      purchaseDate: getVal("purchaseDate","inkopsdatum","Inköpsdatum"),
+      purchasePrice: n(getVal("purchasePrice")),
+      askPrice:      n(getVal("askPrice")),
+      paidPrice:     n(getVal("paidPrice")),
+      stockQty:      n(getVal("stockQty","antal")) || 1,
+      thumbUrl: getThumb()
+    };
+  }
+
+  /* ========= datalager ========= */
+  function loadList(){
+    if (Array.isArray(window.records)) return window.records;
+    try{
+      const raw = localStorage.getItem("vinyl_records");
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    }catch(_){ return []; }
+  }
+  function saveList(list){
+    if (Array.isArray(window.records)) window.records = list;
+    if (typeof window.persistRecords === "function"){ try{ window.persistRecords(list); return; }catch(_){ } }
+    try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){}
+  }
+  function mergeOrPush(list, rec){
+    const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+    if (same){ same.stockQty = (n(same.stockQty) + (rec.stockQty||1)); return list; }
+    list.push(cloneDeep(rec)); // KLONA alltid innan push
+    return list;
+  }
+
+  /* ========= wrap window.records.push så alla push-klonas ========= */
+  function wrapRecordsArray(arr){
+    if (!Array.isArray(arr) || arr.__vrProxied) return arr;
+    const prox = new Proxy(arr, {
+      get(target, prop, recv){
+        if (prop === "push"){
+          return function(...items){
+            const clones = items.map(x=> cloneDeep(x));
+            return Array.prototype.push.apply(target, clones);
+          };
+        }
+        return Reflect.get(target, prop, recv);
+      }
+    });
+    Object.defineProperty(prox, "__vrProxied", {value:true});
+    return prox;
+  }
+  function ensureRecordsWrapped(){
+    if (Array.isArray(window.records)){
+      if (!window.records.__vrChecked){
+        window.records = wrapRecordsArray(window.records);
+        Object.defineProperty(window.records, "__vrChecked", {value:true});
+      }
+      return;
+    }
+    setTimeout(ensureRecordsWrapped, 200);
+  }
+
+  /* ========= hård takeover av SPARA ========= */
+  const SAVE_SELECTOR = '#btnSave, .btn-save, .save, button[type="submit"], input[type="submit"], button[onclick*="save"]';
+  let saving = false;
+
+  function handleSave(ev){
+    if (saving) return; // skydd mot dubbelklick
+    saving = true;
+    try{
+      ev.preventDefault(); ev.stopPropagation();
+      if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+
+      const rec = buildRecordFromDOM();
+      const list = loadList();
+      mergeOrPush(list, rec);
+      saveList(list);
+
+      // uppdatera UI om appen har render-funktion
+      if (typeof window.renderRegisterTable === "function"){
+        try{ window.renderRegisterTable(); }catch(_){}
+      }
+
+      // lätt kvitto
+      try{
+        const note = document.createElement("div");
+        note.textContent = "Sparat ✅";
+        Object.assign(note.style,{position:"fixed",right:"12px",bottom:"12px",background:"#eef7ff",border:"1px solid #bcd",padding:"8px 12px",borderRadius:"8px",zIndex:99999});
+        document.body.appendChild(note); setTimeout(()=>note.remove(), 1200);
+      }catch(_){}
+    }finally{
+      setTimeout(()=> saving=false, 50);
+    }
+  }
+
+  function installSaveTakeover(){
+    // capture + bubble för att vinna över andra handlers
+    document.addEventListener("submit", handleSave, true);
+    document.addEventListener("submit", handleSave, false);
+    document.addEventListener("click", function(ev){
+      const btn = ev.target.closest(SAVE_SELECTOR);
+      if (btn) handleSave(ev);
+    }, true);
+    document.addEventListener("click", function(ev){
+      const btn = ev.target.closest(SAVE_SELECTOR);
+      if (btn) handleSave(ev);
+    }, false);
+  }
+
+  /* ========= körning ========= */
+  document.addEventListener("DOMContentLoaded", function(){
+    ensureMetaSectionAndMoveFields();
+    ensureRecordsWrapped();
+    installSaveTakeover();
+  });
+
+  // om DOM uppdateras efter scanning – kör igen
+  if (window.MutationObserver){
+    new MutationObserver(()=> ensureMetaSectionAndMoveFields())
+      .observe(document.body, {childList:true, subtree:true});
+  }
+
+  // extra försök (mobil)
+  let tries = 20;
+  const iv = setInterval(()=>{
+    ensureMetaSectionAndMoveFields();
+    ensureRecordsWrapped();
+    if(--tries<=0) clearInterval(iv);
+  }, 300);
+})();
+</script>
 
   <body>
   
