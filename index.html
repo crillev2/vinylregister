@@ -1,946 +1,3 @@
-<!doctype html>
-<html lang="sv">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Scanner + Metadata</title>
-  <style>
-    :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; --chip:#f6f6f6; }
-    * { box-sizing: border-box; }
-    body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--fg); background:var(--bg); margin:16px; }
-    h1{ margin: 0 0 12px; }
-    .vr-nav{ display:flex; gap:8px; align-items:center; margin:8px 0 16px; }
-    .vr-btn{ border:1px solid var(--line); border-radius:12px; padding:8px 12px; background:var(--chip); cursor:pointer; }
-    .vr-btn:hover{ background:#eee; }
-    .metadata-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin:12px 0 16px; }
-    .field{ display:flex; flex-direction:column; gap:6px; }
-    .field span{ font-size:0.9rem; color:var(--muted); }
-    .manual-field{ background:#f8fbff; border:1px solid #dbe7ff; border-radius:8px; padding:8px; }
-    .manual-field:focus{ outline:2px solid #9ec5ff; background:#fff; }
-    .row-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .vr-thumb{ width:48px; height:48px; object-fit:cover; border-radius:6px; border:1px solid #ddd; }
-    .wrap{ border:1px solid var(--line); border-radius:12px; padding:12px; margin:12px 0; }
-    .muted{ color:var(--muted); }
-    .table-wrap{ border:1px solid var(--line); border-radius:12px; overflow:auto; }
-    table{ width:100%; border-collapse:collapse; }
-    th, td{ padding:10px; border-bottom:1px solid #f0f0f0; text-align:left; }
-    th{ background:#fafafa; }
-    td.right, th.right{ text-align:right; }
-    .col-ean{ display:none !important; } /* döljer EAN-kolumnen */
-    #quickSearch{ width:100%; margin:8px 0 12px; }
-    @media (max-width: 900px){ .metadata-grid{ grid-template-columns:1fr; } }
-    /* Scanner overlay */
-    .scanner-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.85); display:none; align-items:center; justify-content:center; z-index:99999; }
-    .scanner-card{ width:min(640px, 96vw); background:#000; border-radius:16px; overflow:hidden; border:1px solid #333; }
-    .scanner-video{ width:100%; max-height:60vh; background:#000; }
-    .scanner-bar{ display:flex; gap:8px; padding:8px; background:#111; color:#fff; align-items:center; justify-content:space-between; }
-    .scanner-status{ font-size:.9rem; opacity:.9; }
-    .toast{ position:fixed; right:12px; bottom:12px; background:#eef7ff; border:1px solid #bcd; padding:8px 12px; border-radius:8px; z-index:99999; }
-  </style>
-  <!-- Fallback: göm EAN även utan JS (EAN är kolumn 6) -->
-  <style>
-    table:has(th[data-col="ean"]) th[data-col="ean"],
-    table:has(th[data-col="ean"]) tbody td:nth-child(6) { display:none !important; }
-  </style>
-  <!-- ZXing fallback (laddas endast om BarcodeDetector saknas) -->
-  <script>
-    (function(){
-      if (!('BarcodeDetector' in window)) {
-        var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
-        s.defer = true;
-        document.head.appendChild(s);
-      }
-    })();
-  </script>
-</head>
-<script>
-/* ==== AUTO-ADD EFTER METADATA v1 ==== */
-(function(){
-  "use strict";
-  const $ = (s,r=document)=>r.querySelector(s);
-  const n = v => Number(v||0)||0;
-
-  // läs/skriv lista
-  function loadList(){ try{ const raw=localStorage.getItem("vinyl_records"); const arr=raw?JSON.parse(raw):[]; return Array.isArray(arr)?arr:[]; }catch(_){ return []; } }
-  function saveList(list){ try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){ } }
-
-  // bygg post från skärmen
-  function buildRecordFromForm(){
-    return {
-      id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
-      artist: $("#artist")?.value?.trim() || "",
-      title:  $("#album")?.value?.trim()  || "",
-      year:   $("#year")?.value || "",
-      format: $("#format")?.value || "",
-      ean:    $("#ean")?.value || "",
-      purchaseDate: $("#purchaseDate")?.value || "",
-      purchasePrice: n($("#purchasePrice")?.value),
-      askPrice:      n($("#askPrice")?.value),
-      paidPrice:     n($("#paidPrice")?.value),
-      stockQty:      n($("#stockQty")?.value) || 1,
-      thumbUrl: $("#thumb")?.src || ""
-    };
-  }
-
-  // merge eller lägg till ny rad
-  function mergeOrPush(list, rec){
-    const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
-    if (same){ same.stockQty = (n(same.stockQty) + (rec.stockQty||1)); return list; }
-    const clone = (structuredClone ? structuredClone(rec) : JSON.parse(JSON.stringify(rec)));
-    list.push(clone); return list;
-  }
-
-  // enkel render (om din inbyggda render finns, låt den sköta det)
-  function renderNow(){
-    if (typeof window.renderRegisterTable === "function"){ try{ window.renderRegisterTable(); return; }catch(_){ } }
-    const tb = document.querySelector("#registerTable tbody"); if(!tb) return;
-    const list = loadList(); tb.innerHTML = "";
-    const today = new Date();
-    function daysBetween(d1, d2){ const a=new Date(d1), b=new Date(d2); return (isNaN(a)||isNaN(b))? "": Math.floor(Math.abs(b-a)/(1000*60*60*24)); }
-    list.forEach(rec=>{
-      const tr = document.createElement("tr");
-      const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : "";
-      const margin = (n(rec.paidPrice) && n(rec.purchasePrice)) ? (n(rec.paidPrice)-n(rec.purchasePrice)) : "";
-      tr.innerHTML =
-        `<td>${rec.thumbUrl?`<img src="${rec.thumbUrl}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #ddd">`:""}</td>
-         <td>${rec.artist||""}</td>
-         <td>${rec.title||""}</td>
-         <td>${rec.year||""}</td>
-         <td>${rec.format||""}</td>
-         <td class="col-ean">${rec.ean||""}</td>
-         <td class="right">${dgl}</td>
-         <td class="right">${rec.purchasePrice||""}</td>
-         <td class="right">${rec.paidPrice||""}</td>
-         <td class="right">${margin}</td>
-         <td class="right">—</td>`;
-      tb.appendChild(tr);
-    });
-  }
-
-  // liten notis
-  function toast(msg){
-    const t=document.createElement('div');
-    t.textContent=msg;
-    Object.assign(t.style,{position:"fixed",right:"12px",bottom:"12px",background:"#eef7ff",border:"1px solid #bcd",padding:"8px 12px",borderRadius:"8px",zIndex:99999});
-    document.body.appendChild(t); setTimeout(()=>t.remove(),1400);
-  }
-
-  // auto-add när EAN + (Artist eller Album) finns
-  let lastSavedEAN = "";
-  function maybeAutoAdd(){
-    const ean   = $("#ean")?.value?.trim() || "";
-    const artist= $("#artist")?.value?.trim() || "";
-    const album = $("#album")?.value?.trim() || "";
-    if (!ean) return;
-    if (!(artist || album)) return;
-    if (ean === lastSavedEAN) return; // spara bara en gång per skanning
-
-    const rec = buildRecordFromForm();
-    const list = loadList(); mergeOrPush(list, rec); saveList(list);
-    lastSavedEAN = ean;
-    renderNow();
-    toast("Tillagd i register ✅");
-  }
-
-  // Trigga när metadata fylls i (artist/album uppdateras)
-  ["input","change"].forEach(evt=>{
-    document.addEventListener(evt, (e)=>{
-      if (e.target && ["ean","artist","album"].includes(e.target.id)) {
-        setTimeout(maybeAutoAdd, 150); // vänta en kort stund så fälten hinner uppdateras
-      }
-    }, true);
-  });
-
-  // som extra säkerhet – kör en gång 2 sekunder efter att sidan laddat (om fält redan är ifyllda)
-  document.addEventListener("DOMContentLoaded", ()=> setTimeout(maybeAutoAdd, 2000));
-})();
-</script>
-<script>
-/* ===== VR FIX v5: säkert render + auto-add + unhide ===== */
-(function(){ 'use strict';
-  const $=(s,r=document)=>r.querySelector(s);
-  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
-  const n=v=>Number(v||0)||0;
-
-  /* 1) Rädda fram registret om något gömts tidigare */
-  function unhideRegister(){
-    ['#register','#registerTable'].forEach(sel=>{
-      $$(sel).forEach(root=>{
-        root.querySelectorAll('[style*="display"]').forEach(el=>{
-          if(!el.classList.contains('col-ean')) el.style.removeProperty('display');
-        });
-      });
-    });
-  }
-
-  /* 2) Hitta tabellens tbody även om id saknas/ändrats */
-  function getTbody(){
-    let tb = $('#registerTable tbody');
-    if (tb) return tb;
-    for (const t of $$('table')){
-      const head = t.tHead && t.tHead.rows[0]; if(!head) continue;
-      const labels = Array.from(head.cells).map(c=>(c.textContent||'').trim().toLowerCase());
-      if (labels.includes('artist') && (labels.includes('album') || labels.includes('titel'))){
-        return t.tBodies[0] || t.createTBody();
-      }
-    }
-    return null;
-  }
-
-  /* 3) Storage helpers */
-  function load(){ try{ const raw=localStorage.getItem('vinyl_records'); const a=raw?JSON.parse(raw):[]; return Array.isArray(a)?a:[]; }catch(_){ return []; } }
-  function save(a){ try{ localStorage.setItem('vinyl_records', JSON.stringify(a)); }catch(_){ } }
-
-  function daysBetween(a,b){ a=new Date(a); b=new Date(b); if(isNaN(a)||isNaN(b)) return ''; return Math.floor((b-a)/86400000); }
-
-  /* 4) Robust render som alltid funkar */
-  function render(){
-    unhideRegister();
-    const tb=getTbody(); if(!tb) return;
-    const list=load(); tb.innerHTML='';
-    const today=new Date();
-    for (const rec of list){
-      const tr=document.createElement('tr');
-      const dgl=rec.purchaseDate?daysBetween(rec.purchaseDate,today):'';
-      const margin=(n(rec.paidPrice)&&n(rec.purchasePrice))?(n(rec.paidPrice)-n(rec.purchasePrice)):'';
-      const img = rec.thumbUrl ? `<img src="${rec.thumbUrl}" class="vr-thumb" alt="" onerror="this.remove()">` : '';
-      tr.innerHTML = `
-        <td>${img}</td>
-        <td>${rec.artist||''}</td>
-        <td>${rec.title||''}</td>
-        <td>${rec.year||''}</td>
-        <td>${rec.format||''}</td>
-        <td class="col-ean">${rec.ean||''}</td>
-        <td class="right">${dgl}</td>
-        <td class="right">${rec.purchasePrice||''}</td>
-        <td class="right">${rec.paidPrice||''}</td>
-        <td class="right">${margin}</td>
-        <td class="right">—</td>`;
-      tb.appendChild(tr);
-    }
-    // se till att EAN-kolumnen är dold
-    const tbl = tb.closest('table');
-    if (tbl && tbl.tHead){
-      const idx = Array.from(tbl.tHead.rows[0].cells)
-        .findIndex(th => th.getAttribute('data-col')==='ean' || (th.textContent||'').trim().toLowerCase()==='ean');
-      if (idx>=0){
-        tbl.tHead.rows[0].cells[idx].classList.add('col-ean');
-        Array.from(tb.rows).forEach(r=>{ if(r.cells[idx]) r.cells[idx].classList.add('col-ean'); });
-      }
-    }
-  }
-  window.renderRegisterTable = render; // om sidan vill kalla den
-
-  /* 5) Bygg post från fälten på skärmen */
-  function buildFromForm(){
-    const get=id=> (document.getElementById(id)||document.querySelector(`[name="${id}"]`))?.value?.trim()||'';
-    const img=$('#thumb'); const url=img && img.src ? img.src : '';
-    return {
-      id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
-      artist: get('artist') || get('Artist') || $('#scan-artist')?.textContent || '',
-      title:  get('album')  || get('title')  || get('Album') || $('#scan-title')?.textContent || '',
-      year:   get('year')   || get('År'),
-      format: get('format') || get('Format'),
-      ean:    get('ean')    || get('EAN')    || get('barcode') || $('#scan-ean')?.textContent || '',
-      purchaseDate:  get('purchaseDate') || get('inkopsdatum') || get('Inköpsdatum'),
-      purchasePrice: Number(get('purchasePrice')||0) || 0,
-      askPrice:      Number(get('askPrice')||0)      || 0,
-      paidPrice:     Number(get('paidPrice')||0)     || 0,
-      stockQty:      Number(get('stockQty')||get('antal')||1) || 1,
-      thumbUrl: url
-    };
-  }
-
-  /* 6) Auto-lägg till EN gång när metadata blivit komplett */
-  let lastSavedKey = '';
-  function addCurrentOnce(){
-    const rec = buildFromForm();
-    if (!(rec.ean && (rec.artist || rec.title))) return;
-    const key = rec.ean + '|' + rec.artist + '|' + rec.title;
-    if (key === lastSavedKey) return; // undvik dubletter
-    const list = load();
-    // slå ihop om exakt samma EAN+artist+titel redan finns
-    const same = list.find(r=> r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
-    if (same){ same.stockQty = (Number(same.stockQty)||0) + (Number(rec.stockQty)||1); }
-    else { list.push(structuredClone?structuredClone(rec):JSON.parse(JSON.stringify(rec))); }
-    save(list);
-    lastSavedKey = key;
-    render();
-    // kvitto
-    const t=document.createElement('div');
-    t.textContent='Tillagd i register ✅';
-    Object.assign(t.style,{position:'fixed',right:'12px',bottom:'12px',background:'#eef7ff',border:'1px solid #bcd',padding:'8px 12px',borderRadius:'8px',zIndex:99999});
-    document.body.appendChild(t); setTimeout(()=>t.remove(),1400);
-  }
-
-  // lyssna på ändringar i de vanligaste fälten
-  ['ean','artist','album','title'].forEach(id=>{
-    const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
-    if (el){
-      ['input','change'].forEach(evt=>{
-        el.addEventListener(evt, ()=>{ clearTimeout(addCurrentOnce._t); addCurrentOnce._t=setTimeout(addCurrentOnce, 250); }, {capture:true});
-      });
-    }
-  });
-
-  /* 7) Rendera automatiskt när något skriver vinyl_records */
-  try{
-    const _set = localStorage.setItem.bind(localStorage);
-    localStorage.setItem = function(k,v){ const r=_set(k,v); if(k==='vinyl_records') try{ render(); }catch(_){ } return r; };
-  }catch(_){}
-
-  /* 8) Första render + extra försök (mobil) */
-  document.addEventListener('DOMContentLoaded', ()=>{ render(); setTimeout(render,600); setTimeout(render,1800); });
-
-})();
-</script>
-
-  <body>
-
-  <nav class="vr-nav">
-    <button class="vr-btn" onclick="location.href='#register'">Register</button>
-    <button class="vr-btn" onclick="location.href='rapport.html'">Rapport</button>
-  </nav>
-
-  <h1>Vinylregister</h1>
-
-  <div class="wrap">
-    <h2>Metadata</h2>
-    <div class="metadata-grid" id="vr-meta">
-      <label class="field"><span>Artist</span><input id="artist" class="manual-field" type="text" placeholder="Ex. Deep Purple"></label>
-      <label class="field"><span>Album</span><input id="album" class="manual-field" type="text" placeholder="Ex. Burn"></label>
-      <label class="field"><span>År</span><input id="year" class="manual-field" type="number" step="1"></label>
-      <label class="field"><span>Format</span><input id="format" class="manual-field" type="text" placeholder="LP/EP/12&quot;"></label>
-      <label class="field"><span>EAN</span><input id="ean" class="manual-field" type="text" placeholder="Skannas eller skrivs in"></label>
-      <label class="field"><span>Inköpsdatum</span><input id="purchaseDate" class="manual-field" type="date"></label>
-      <label class="field"><span>Inköpspris</span><input id="purchasePrice" class="manual-field" type="number" step="1"></label>
-      <label class="field"><span>Begärt pris</span><input id="askPrice" class="manual-field" type="number" step="1"></label>
-      <label class="field"><span>Antal</span><input id="stockQty" class="manual-field" type="number" step="1" value="1"></label>
-      <label class="field"><span>Omslag</span><img id="thumb" class="vr-thumb" alt="cover"></label>
-    </div>
-    <div class="row-actions">
-      <button class="vr-btn" id="btnScan">Skanna streckkod</button>
-      <button class="vr-btn" id="btnUse">Använd</button>
-      <button class="vr-btn" id="btnSave">Spara</button>
-      <span class="muted">Tips: öppna sidan med <code>?demo=1</code> för testposter.</span>
-    </div>
-  </div>
-
-  <div class="wrap" id="register">
-    <h2>Register</h2>
-    <input id="quickSearch" class="manual-field" type="search" placeholder="Sök artist/titel/EAN…">
-    <div class="table-wrap">
-      <table id="registerTable">
-        <thead>
-          <tr>
-            <th>Bild</th>
-            <th>Artist</th>
-            <th>Album</th>
-            <th>År</th>
-            <th>Format</th>
-            <th data-col="ean" class="col-ean">EAN</th>
-            <th class="right">Dagar</th>
-            <th class="right">Inköp</th>
-            <th class="right">Sålt</th>
-            <th class="right">Marginal</th>
-            <th class="right">Åtgärd</th>
-          </tr>
-        </thead>
-        <tbody><!-- renderas av JS --></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Scanner overlay -->
-  <div class="scanner-overlay" id="scannerOverlay" aria-hidden="true">
-    <div class="scanner-card">
-      <video id="scannerVideo" class="scanner-video" autoplay playsinline></video>
-      <div class="scanner-bar">
-        <div class="scanner-status" id="scannerStatus">Kamera initieras…</div>
-        <div style="display:flex; gap:8px;">
-          <button class="vr-btn" id="btnTorch" title="Ficklampa">Ficklampa</button>
-          <button class="vr-btn" id="btnCloseScanner">Stäng</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-  (function(){
-    "use strict";
-
-    /* kvitto */
-    try{
-      const tag = document.createElement('div');
-      tag.textContent = "Lookup aktiv";
-      Object.assign(tag.style, {position:'fixed',left:'12px',bottom:'12px',background:'#F0FFF5',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
-      document.body.appendChild(tag); setTimeout(()=>tag.remove(), 1200);
-    }catch(e){}
-
-    const $ = (s,r=document)=>r.querySelector(s);
-    const n = v => Number(v||0)||0;
-
-    /* ---- data store ---- */
-    function loadList(){ try{ const raw=localStorage.getItem("vinyl_records"); const arr=raw?JSON.parse(raw):[]; return Array.isArray(arr)?arr:[]; }catch(_){ return []; } }
-    function saveList(list){ try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){ } }
-
-    /* ---- UI helpers ---- */
-    function toast(msg){
-      const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
-      document.body.appendChild(t); setTimeout(()=>t.remove(), 1400);
-    }
-
-    function daysBetween(d1, d2){ const a=(d1 instanceof Date)?d1:new Date(d1); const b=(d2 instanceof Date)?d2:new Date(d2); if(isNaN(a)||isNaN(b))return ""; return Math.floor(Math.abs(b-a)/(1000*60*60*24)); }
-
-    function renderRegisterTable(){
-      const tb = $("#registerTable tbody"); if(!tb) return;
-      const list = loadList(); tb.innerHTML = ""; const today = new Date();
-      list.forEach(rec=>{
-        const tr = document.createElement("tr");
-        const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : "";
-        const margin = (n(rec.paidPrice) && n(rec.purchasePrice)) ? (n(rec.paidPrice)-n(rec.purchasePrice)) : "";
-        tr.innerHTML = [
-          '<td>', (rec.thumbUrl? '<img src="'+rec.thumbUrl+'" class="vr-thumb" alt="">' : ''), '</td>',
-          '<td>', (rec.artist||''), '</td>',
-          '<td>', (rec.title||''), '</td>',
-          '<td>', (rec.year||''), '</td>',
-          '<td>', (rec.format||''), '</td>',
-          '<td class="col-ean">', (rec.ean||''), '</td>',
-          '<td class="right">', dgl, '</td>',
-          '<td class="right">', (rec.purchasePrice||''), '</td>',
-          '<td class="right">', (rec.paidPrice||''), '</td>',
-          '<td class="right">', (margin||''), '</td>',
-          '<td class="right">—</td>'
-        ].join('');
-        tb.appendChild(tr);
-      });
-    }
-
-    function buildRecordFromForm(){
-      return {
-        id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
-        artist: $("#artist")?.value?.trim() || "",
-        title:  $("#album")?.value?.trim()  || "",
-        year:   $("#year")?.value || "",
-        format: $("#format")?.value || "",
-        ean:    $("#ean")?.value || "",
-        purchaseDate: $("#purchaseDate")?.value || "",
-        purchasePrice: n($("#purchasePrice")?.value),
-        askPrice:      n($("#askPrice")?.value),
-        paidPrice:     n($("#paidPrice")?.value),
-        stockQty:      n($("#stockQty")?.value) || 1,
-        thumbUrl: $("#thumb")?.src || ""
-      };
-    }
-
-    function mergeOrPush(list, rec){
-      const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
-      if (same){ same.stockQty = (n(same.stockQty) + (rec.stockQty||1)); return list; }
-      const clone = (structuredClone ? structuredClone(rec) : JSON.parse(JSON.stringify(rec)));
-      list.push(clone); return list;
-    }
-
-    $("#btnSave")?.addEventListener("click", function(ev){
-      ev.preventDefault();
-      const rec = buildRecordFromForm();
-      const list = loadList(); mergeOrPush(list, rec); saveList(list);
-      renderRegisterTable(); toast("Sparat ✅");
-    });
-
-    $("#quickSearch")?.addEventListener("input", function(){
-      const q = this.value.toLowerCase();
-      $("#registerTable tbody")?.querySelectorAll("tr").forEach(tr=>{
-        tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none";
-      });
-    });
-
-    /* ===================== BARCODE SCANNER (manuell stängning) ===================== */
-    const overlay = $("#scannerOverlay");
-    const video   = $("#scannerVideo");
-    const status  = $("#scannerStatus");
-    const btnScan = $("#btnScan");
-    const btnUse  = $("#btnUse");
-    const btnClose= $("#btnCloseScanner");
-    const btnTorch= $("#btnTorch");
-
-    let stream = null;
-    let rafId = 0;
-    let reader = null; // ZXing fallback
-    let useBarcodeDetector = 'BarcodeDetector' in window;
-    let detector = null;
-    let lastCode = "";
-    let lastAt = 0;
-    let stopped = true;
-
-    function setStatus(msg){ if(status) status.textContent = msg; }
-    function showOverlay(){ overlay.style.display = "flex"; overlay.setAttribute('aria-hidden','false'); }
-    function hideOverlay(){ overlay.style.display = "none"; overlay.setAttribute('aria-hidden','true'); }
-
-    async function startScanner(){
-      stopped = false; lastCode=""; lastAt=0;
-      showOverlay(); setStatus("Startar kamera…");
-
-      try{
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio:false });
-        video.srcObject = stream;
-        await video.play();
-      }catch(e){
-        setStatus("Kunde inte starta kamera: " + e.message);
-        return;
-      }
-
-      if(useBarcodeDetector){
-        try{ detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128'] }); }
-        catch(_){ useBarcodeDetector = false; }
-      }
-
-      if(useBarcodeDetector){
-        setStatus("Skannar (kamera)…");
-        detectLoop();
-      }else{
-        // ZXing fallback
-        setStatus("Skannar (ZXing)…");
-        const tryStartZX = ()=>{
-          if (window.ZXing && window.ZXing.BrowserMultiFormatReader){
-            reader = new window.ZXing.BrowserMultiFormatReader();
-            reader.decodeFromVideoDevice(null, video, (result, err) => {
-              if (result && !stopped){
-                onDetected(result.getText());
-              }
-            });
-          }else{ setTimeout(tryStartZX, 300); }
-        };
-        tryStartZX();
-      }
-    }
-
-    function stopStream(){
-      try{
-        if(reader && reader.reset){ reader.reset(); }
-        if(rafId) cancelAnimationFrame(rafId);
-        if(stream){ stream.getTracks().forEach(t=>t.stop()); }
-      }catch(_){}
-      stream = null; reader = null; detector = null; rafId = 0;
-    }
-
-    function closeScanner(){ stopped = true; stopStream(); hideOverlay(); }
-    document.addEventListener("visibilitychange", function(){ if(document.hidden) closeScanner(); });
-
-    async function detectLoop(){
-      if(stopped) return;
-      try{
-        const results = await detector.detect(video);
-        if(results && results.length){
-          const raw = results[0].rawValue || results[0].rawValueText || "";
-          if(raw){ onDetected(raw); }
-        }
-      }catch(_){ /* ignore */ }
-      rafId = requestAnimationFrame(detectLoop);
-    }
-
-    async function toggleTorch(){
-      if(!stream) return;
-      const track = stream.getVideoTracks()[0];
-      const caps = track.getCapabilities ? track.getCapabilities() : {};
-      if(!caps.torch) { setStatus("Ficklampa stöds ej"); return; }
-      const settings = track.getSettings();
-      const on = !settings.torch;
-      try { await track.applyConstraints({ advanced: [{ torch: on }] }); setStatus(on ? "Ficklampa: på" : "Ficklampa: av"); }
-      catch(e){ setStatus("Kunde inte toggla ficklampa"); }
-    }
-
-    function onDetected(code){
-      const now = Date.now();
-      if(code === lastCode && (now - lastAt) < 1200) return; // throttla dubletter
-      lastCode = code; lastAt = now;
-      setStatus("Hittade: " + code + " (lämna öppet om du vill skanna igen)");
-      if ('vibrate' in navigator) try{ navigator.vibrate(60); }catch(_){}
-      const eanEl = $("#ean"); if(eanEl) eanEl.value = code;
-
-      // Auto-lookup metadata nu när EAN finns
-      lookupByEAN(code);
-    }
-
-    btnScan?.addEventListener("click", startScanner);
-    btnClose?.addEventListener("click", closeScanner);
-    btnTorch?.addEventListener("click", toggleTorch);
-    btnUse?.addEventListener("click", function(){ closeScanner(); });
-
-    /* ========= Metadata via MusicBrainz ========= */
-    async function lookupByEAN(ean){
-      try{
-        setStatus("Söker metadata…");
-        const url = "https://musicbrainz.org/ws/2/release/?query=barcode:" + encodeURIComponent(ean) + "&fmt=json";
-        const res = await fetch(url, { method:"GET" });
-        if(!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        const rel = (data.releases && data.releases.length) ? data.releases[0] : null;
-        if(!rel){ setStatus("Hittade ingen träff"); toast("Ingen träff på streckkoden"); return; }
-
-        // artist
-        let artist = "";
-        if (Array.isArray(rel['artist-credit']) && rel['artist-credit'].length){
-          artist = rel['artist-credit'].map(ac => ac.name || (ac.artist && ac.artist.name) || "").filter(Boolean).join(", ");
-        }
-        // title
-        const title = rel.title || "";
-        // year
-        const year = (rel.date && rel.date.slice(0,4)) || ((rel['release-events'] && rel['release-events'][0] && rel['release-events'][0].date) ? rel['release-events'][0].date.slice(0,4) : "");
-        // format
-        const format = (rel.media && rel.media[0] && rel.media[0].format) ? rel.media[0].format : "";
-
-        // cover (best-effort)
-        const mbid = rel.id;
-        const cover = "https://coverartarchive.org/release/" + mbid + "/front-250";
-
-        // fyll fälten (rör inte manuellt ifyllda om de redan finns)
-        if ($("#artist") && !$("#artist").value) $("#artist").value = artist;
-        if ($("#album")  && !$("#album").value)  $("#album").value  = title;
-        if ($("#year")   && !$("#year").value)   $("#year").value   = year;
-        if ($("#format") && !$("#format").value) $("#format").value = format;
-        if ($("#thumb")) { $("#thumb").src = cover; $("#thumb").alt = title || "Omslag"; }
-
-        setStatus("Klar: " + (artist ? artist + " – " : "") + (title || "Okänt album"));
-        toast("Metadata hämtad ✅");
-      }catch(err){
-        setStatus("Metadata-fel");
-        toast("Kunde inte hämta metadata");
-      }
-    }
-
-    /* init */
-    document.addEventListener("DOMContentLoaded", renderRegisterTable);
-  })();
-  </script>
-<script>
-/* ===== VR FIX v6 – render + auto-add + omslag-fix ===== */
-(function(){ 'use strict';
-  // litet kvitto att patchen körs
-  try{
-    const tag=document.createElement('div');
-    tag.textContent='VR Fix v6 aktiv';
-    Object.assign(tag.style,{position:'fixed',left:'12px',bottom:'12px',background:'#F0FFF5',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
-    document.body.appendChild(tag); setTimeout(()=>tag.remove(),1500);
-  }catch(_){}
-
-  const $=(s,r=document)=>r.querySelector(s);
-  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
-  const n=v=>Number(v||0)||0;
-
-  /* ---------- LocalStorage helpers ---------- */
-  function load(){ try{ const raw=localStorage.getItem('vinyl_records'); const a=raw?JSON.parse(raw):[]; return Array.isArray(a)?a:[]; }catch(_){ return []; } }
-  function save(a){ try{ localStorage.setItem('vinyl_records', JSON.stringify(a)); }catch(_){ } }
-
-  /* ---------- Se till att register-tabellen finns ---------- */
-  function ensureRegisterTable(){
-    let wrap = $('#register');
-    if (!wrap){
-      wrap = document.createElement('div');
-      wrap.id='register'; wrap.className='wrap';
-      wrap.innerHTML = `<h2>Register</h2>
-        <input id="quickSearch" class="manual-field" type="search" placeholder="Sök artist/titel/EAN…">
-        <div class="table-wrap">
-          <table id="registerTable"><thead><tr>
-            <th>Bild</th><th>Artist</th><th>Album</th><th>År</th><th>Format</th>
-            <th data-col="ean" class="col-ean">EAN</th><th class="right">Dagar</th>
-            <th class="right">Inköp</th><th class="right">Sålt</th><th class="right">Marginal</th><th class="right">Åtgärd</th>
-          </tr></thead><tbody></tbody></table>
-        </div>`;
-      document.body.appendChild(wrap);
-    }
-    if (!$('#registerTable tbody')) {
-      const tbl = $('#registerTable') || document.createElement('table');
-      if (!tbl.id) tbl.id='registerTable';
-      if (!tbl.tHead){
-        tbl.innerHTML = `<thead><tr>
-          <th>Bild</th><th>Artist</th><th>Album</th><th>År</th><th>Format</th>
-          <th data-col="ean" class="col-ean">EAN</th><th class="right">Dagar</th>
-          <th class="right">Inköp</th><th class="right">Sålt</th><th class="right">Marginal</th><th class="right">Åtgärd</th>
-        </tr></thead><tbody></tbody>`;
-      } else if (!tbl.tBodies.length) {
-        tbl.appendChild(document.createElement('tbody'));
-      }
-      if (!tbl.closest('.table-wrap')){
-        const tw=document.createElement('div'); tw.className='table-wrap';
-        tbl.parentNode.insertBefore(tw, tbl); tw.appendChild(tbl);
-      }
-    }
-  }
-
-  /* ---------- Render ---------- */
-  function daysBetween(a,b){ a=new Date(a); b=new Date(b); if(isNaN(a)||isNaN(b)) return ''; return Math.floor((b-a)/86400000); }
-
-  function render(){
-    ensureRegisterTable();
-    // ta bort ev. felaktigt gömda element
-    ['#register', '#registerTable'].forEach(sel=>{
-      $$(sel).forEach(root=>{
-        root.querySelectorAll('[style*="display"]').forEach(el=>{
-          if(!el.classList.contains('col-ean')) el.style.removeProperty('display');
-        });
-      });
-    });
-
-    const tb = $('#registerTable tbody'); if(!tb) return;
-    const list = load(); tb.innerHTML='';
-    const today = new Date();
-
-    list.forEach(rec=>{
-      const tr = document.createElement('tr');
-      const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : '';
-      const margin = (n(rec.paidPrice)&&n(rec.purchasePrice)) ? (n(rec.paidPrice)-n(rec.purchasePrice)) : '';
-      const img = rec.thumbUrl ? `<img src="${rec.thumbUrl}" class="vr-thumb" alt="" onerror="this.remove()">` : '';
-      tr.innerHTML = `
-        <td>${img}</td>
-        <td>${rec.artist||''}</td>
-        <td>${rec.title||''}</td>
-        <td>${rec.year||''}</td>
-        <td>${rec.format||''}</td>
-        <td class="col-ean">${rec.ean||''}</td>
-        <td class="right">${dgl}</td>
-        <td class="right">${rec.purchasePrice||''}</td>
-        <td class="right">${rec.paidPrice||''}</td>
-        <td class="right">${margin}</td>
-        <td class="right">—</td>`;
-      tb.appendChild(tr);
-    });
-
-    // dölj EAN-kolumnen
-    const tbl = tb.closest('table');
-    if (tbl && tbl.tHead){
-      const idx = Array.from(tbl.tHead.rows[0].cells)
-        .findIndex(th => th.getAttribute('data-col')==='ean' || (th.textContent||'').trim().toLowerCase()==='ean');
-      if (idx>=0){
-        tbl.tHead.rows[0].cells[idx].classList.add('col-ean');
-        Array.from(tb.rows).forEach(r=>{ if(r.cells[idx]) r.cells[idx].classList.add('col-ean'); });
-      }
-    }
-  }
-  window.renderRegisterTable = render; // gör tillgänglig om annan kod vill kalla
-
-  /* ---------- Bygg post från formuläret ---------- */
-  function buildFromForm(){
-    const get=id=> (document.getElementById(id)||document.querySelector(`[name="${id}"]`))?.value?.trim()||'';
-    const img=$('#thumb'); const url=(img && img.src && !/data:|^$/.test(img.src)) ? img.src : '';
-    return {
-      id:(crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()),
-      artist:get('artist')||$('#scan-artist')?.textContent||'',
-      title:get('album')||get('title')||$('#scan-title')?.textContent||'',
-      year:get('year'),
-      format:get('format'),
-      ean:get('ean')||$('#scan-ean')?.textContent||'',
-      purchaseDate:get('purchaseDate')||get('inkopsdatum'),
-      purchasePrice:n(get('purchasePrice')),
-      askPrice:n(get('askPrice')),
-      paidPrice:n(get('paidPrice')),
-      stockQty:n(get('stockQty'))||1,
-      thumbUrl:url
-    };
-  }
-
-  /* ---------- Lägg till automatiskt när det är komplett ---------- */
-  let lastKey='';
-  function autoAddIfReady(){
-    const rec = buildFromForm();
-    if (!(rec.ean && (rec.artist || rec.title))) return;
-    const key = rec.ean+'|'+rec.artist+'|'+rec.title;
-    if (key === lastKey) return;
-    const list = load();
-    const same = list.find(r=> r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
-    if (same){ same.stockQty = (n(same.stockQty)||0) + (n(rec.stockQty)||1); }
-    else { list.push((structuredClone?structuredClone(rec):JSON.parse(JSON.stringify(rec)))); }
-    save(list);
-    lastKey = key;
-    render();
-    // kvitto
-    try{
-      const t=document.createElement('div');
-      t.textContent='Tillagd i register ✅';
-      Object.assign(t.style,{position:'fixed',right:'12px',bottom:'12px',background:'#eef7ff',border:'1px solid #bcd',padding:'8px 12px',borderRadius:'8px',zIndex:99999});
-      document.body.appendChild(t); setTimeout(()=>t.remove(),1300);
-    }catch(_){}
-  }
-
-  // lyssna på fält som brukar fyllas av metadata
-  ['ean','artist','album','title'].forEach(id=>{
-    ['input','change'].forEach(evt=>{
-      document.addEventListener(evt, e=>{
-        if (e.target && e.target.id===id) {
-          clearTimeout(autoAddIfReady._t);
-          autoAddIfReady._t = setTimeout(autoAddIfReady, 250);
-        }
-      }, true);
-    });
-  });
-
-  // Spara-knapp (om den finns)
-  document.addEventListener('click', e=>{
-    const btn = e.target.closest('#btnSave, .btn-save, button[type="submit"], input[type="submit"]');
-    if (!btn) return;
-    e.preventDefault(); e.stopPropagation();
-    const list = load(); const rec = buildFromForm();
-    const same = list.find(r=> r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
-    if (same){ same.stockQty = (n(same.stockQty)||0) + (n(rec.stockQty)||1); }
-    else { list.push((structuredClone?structuredClone(rec):JSON.parse(JSON.stringify(rec)))); }
-    save(list); render();
-  }, true);
-
-  /* ---------- Render vid alla relevanta händelser ---------- */
-  document.addEventListener('DOMContentLoaded', ()=>{ render(); setTimeout(render,400); setTimeout(render,1500); });
-  window.addEventListener('storage', e=>{ if(e.key==='vinyl_records') render(); });
-  try{
-    const _set = localStorage.setItem.bind(localStorage);
-    localStorage.setItem = function(k,v){ const r=_set(k,v); if(k==='vinyl_records') try{ render(); }catch(_){ } return r; };
-  }catch(_){}
-
-  /* ---------- Fixa omslag: dölj trasig ikon även i metadata-bilden ---------- */
-  const thumb = document.getElementById('thumb');
-  if (thumb){
-    thumb.addEventListener('error', ()=>{ thumb.removeAttribute('src'); thumb.style.display='none'; }, {once:false});
-  }
-})();
-</script>
-<script>
-/* ===== VR FIX v7 – FORCE RENDER + COUNT BADGE ===== */
-(function(){ 'use strict';
-  const $=(s,r=document)=>r.querySelector(s);
-  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
-  const n=v=>Number(v||0)||0;
-
-  /* --- liten badge så vi ser att patchen körs och hur många poster som finns --- */
-  let badge;
-  function setBadge(cnt){
-    try{
-      if(!badge){
-        badge=document.createElement('div');
-        Object.assign(badge.style,{position:'fixed',left:'12px',bottom:'12px',background:'#F0FFF5',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
-        document.body.appendChild(badge);
-      }
-      badge.textContent = `VR Fix v7 • ${cnt} poster`;
-      clearTimeout(setBadge._t); setBadge._t=setTimeout(()=>badge&&badge.remove(), 4000);
-    }catch(_){}
-  }
-
-  /* --- storage helpers --- */
-  function load(){
-    try{
-      const raw = localStorage.getItem('vinyl_records');
-      const arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr : [];
-    }catch(_){ return []; }
-  }
-  function save(arr){
-    try{ localStorage.setItem('vinyl_records', JSON.stringify(arr)); }catch(_){}
-  }
-
-  /* --- se till att register-tabellen finns --- */
-  function ensureRegister(){
-    let wrap = $('#register');
-    if(!wrap){
-      wrap = document.createElement('div');
-      wrap.id='register'; wrap.className='wrap';
-      wrap.innerHTML = `<h2>Register</h2>
-        <input id="quickSearch" class="manual-field" type="search" placeholder="Sök artist/titel/EAN…">
-        <div class="table-wrap">
-          <table id="registerTable"><thead><tr>
-            <th>Bild</th><th>Artist</th><th>Album</th><th>År</th><th>Format</th>
-            <th data-col="ean" class="col-ean">EAN</th><th class="right">Dagar</th>
-            <th class="right">Inköp</th><th class="right">Sålt</th><th class="right">Marginal</th><th class="right">Åtgärd</th>
-          </tr></thead><tbody></tbody></table>
-        </div>`;
-      document.body.appendChild(wrap);
-    }
-    const tbl = $('#registerTable');
-    if (tbl && !tbl.tBodies.length) tbl.appendChild(document.createElement('tbody'));
-  }
-
-  /* --- av-göm allt under register (utom EAN-kolumnen) --- */
-  function unhide(){
-    const root = $('#register'); if(!root) return;
-    root.querySelectorAll('[style*="display"]').forEach(el=>{
-      if(!el.classList.contains('col-ean')) el.style.removeProperty('display');
-    });
-    root.querySelectorAll('[hidden]').forEach(el=> el.hidden=false);
-    root.querySelectorAll('tr[style*="visibility"]').forEach(el=> el.style.removeProperty('visibility'));
-  }
-
-  function daysBetween(a,b){ a=new Date(a); b=new Date(b); if(isNaN(a)||isNaN(b)) return ''; return Math.floor((b-a)/86400000); }
-
-  /* --- render --- */
-  function render(){
-    ensureRegister();
-    unhide();
-
-    const tb = $('#registerTable tbody');
-    if(!tb) return;
-
-    const list = load();
-    setBadge(list.length);
-
-    // Om sökfilter är ifyllt kan allt döljas → rensa filter vid render
-    const qs = $('#quickSearch'); if (qs && qs.value) qs.value = '';
-
-    tb.innerHTML = '';
-    const today = new Date();
-    for(const rec of list){
-      const tr = document.createElement('tr');
-      const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : '';
-      const margin = (n(rec.paidPrice)&&n(rec.purchasePrice)) ? (n(rec.paidPrice)-n(rec.purchasePrice)) : '';
-      const img = rec.thumbUrl ? `<img src="${rec.thumbUrl}" class="vr-thumb" alt="" onerror="this.remove()">` : '';
-      tr.innerHTML = `
-        <td>${img}</td>
-        <td>${rec.artist||''}</td>
-        <td>${rec.title||''}</td>
-        <td>${rec.year||''}</td>
-        <td>${rec.format||''}</td>
-        <td class="col-ean">${rec.ean||''}</td>
-        <td class="right">${dgl}</td>
-        <td class="right">${rec.purchasePrice||''}</td>
-        <td class="right">${rec.paidPrice||''}</td>
-        <td class="right">${margin}</td>
-        <td class="right">—</td>`;
-      tb.appendChild(tr);
-    }
-
-    // Dölj EAN-kolumnen
-    const tbl = tb.closest('table');
-    if (tbl && tbl.tHead){
-      const idx = Array.from(tbl.tHead.rows[0].cells)
-        .findIndex(th => th.getAttribute('data-col')==='ean' || (th.textContent||'').trim().toLowerCase()==='ean');
-      if (idx>=0){
-        tbl.tHead.rows[0].cells[idx].classList.add('col-ean');
-        Array.from(tb.rows).forEach(r=> r.cells[idx] && r.cells[idx].classList.add('col-ean'));
-      }
-    }
-  }
-  window.renderRegisterTable = render;
-
-  /* --- render på allt relevant --- */
-  document.addEventListener('DOMContentLoaded', ()=>{
-    render();
-    // extra försök om andra script bygger DOM sent
-    setTimeout(render, 400);
-    setTimeout(render, 1200);
-    setTimeout(render, 2500);
-  });
-  window.addEventListener('storage', e=>{ if(e.key==='vinyl_records') render(); });
-
-  // Hooka setItem för att alltid rendera efter sparning
-  try{
-    const _set = localStorage.setItem.bind(localStorage);
-    localStorage.setItem = function(k,v){
-      const r = _set(k,v);
-      if (k === 'vinyl_records') { try{ render(); }catch(_){} }
-      return r;
-    };
-  }catch(_){}
-
-  // Sista nödräddningen: re-rendera några gånger
-  let tries = 12;
-  const iv = setInterval(()=>{ render(); if(--tries<=0) clearInterval(iv); }, 1000);
-})();
-</script>
 <script>
 /* ===== VR FIX v8 – storage-migrering + auto-add + force-render ===== */
 (function(){ 'use strict';
@@ -1050,7 +107,150 @@
     setBadge(list.length, ok);
 
     // Rensa ev. sökfilter som döljer allt
-    const qs = $('#quickSearch'); if (qs &&
+    const qs = $('#quickSearch'); if (qs && qs.value) qs.value = '';
 
-</body>
-</html>
+    tb.innerHTML = '';
+    const today = new Date();
+    for (const rec of list){
+      const tr = document.createElement('tr');
+      const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : '';
+      const margin = (n(rec.paidPrice)&&n(rec.purchasePrice)) ? (n(rec.paidPrice)-n(rec.purchasePrice)) : '';
+      const img = rec.thumbUrl ? `<img src="${rec.thumbUrl}" class="vr-thumb" alt="" onerror="this.remove()">` : '';
+      tr.innerHTML = `
+        <td>${img}</td>
+        <td>${rec.artist||''}</td>
+        <td>${rec.title||''}</td>
+        <td>${rec.year||''}</td>
+        <td>${rec.format||''}</td>
+        <td class="col-ean">${rec.ean||''}</td>
+        <td class="right">${dgl}</td>
+        <td class="right">${rec.purchasePrice||''}</td>
+        <td class="right">${rec.paidPrice||''}</td>
+        <td class="right">${margin}</td>
+        <td class="right">—</td>`;
+      tb.appendChild(tr);
+    }
+
+    // Göm EAN-kolumnen
+    const tbl = tb.closest('table');
+    if (tbl && tbl.tHead){
+      const idx = Array.from(tbl.tHead.rows[0].cells)
+        .findIndex(th => th.getAttribute('data-col')==='ean' || (th.textContent||'').trim().toLowerCase()==='ean');
+      if (idx>=0){
+        tbl.tHead.rows[0].cells[idx].classList.add('col-ean');
+        Array.from(tb.rows).forEach(r=> r.cells[idx] && r.cells[idx].classList.add('col-ean'));
+      }
+    }
+  }
+  window.renderRegisterTable = render;
+
+  /* --- Bygg post från fälten --- */
+  function buildFromForm(){
+    const get=id=> (document.getElementById(id)||document.querySelector(`[name="${id}"]`))?.value?.trim()||'';
+    const img=$('#thumb'); const url=(img && img.src && !/^(?:data:)?$/i.test(img.src)) ? img.src : '';
+    return {
+      id:(crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()),
+      artist:get('artist')||$('#scan-artist')?.textContent||'',
+      title:get('album')||get('title')||$('#scan-title')?.textContent||'',
+      year:get('year'),
+      format:get('format'),
+      ean:get('ean')||$('#scan-ean')?.textContent||'',
+      purchaseDate:get('purchaseDate')||get('inkopsdatum'),
+      purchasePrice:n(get('purchasePrice')),
+      askPrice:n(get('askPrice')),
+      paidPrice:n(get('paidPrice')),
+      stockQty:n(get('stockQty'))||1,
+      thumbUrl:url
+    };
+  }
+
+  /* --- Auto-add när EAN + (Artist eller Album) finns (en gång per skanning) --- */
+  let lastKey='';
+  function autoAddIfReady(){
+    if (!storageOK()) { setBadge(0, false); return; }
+    const rec = buildFromForm();
+    if (!(rec.ean && (rec.artist || rec.title))) return;
+    const key = rec.ean+'|'+rec.artist+'|'+rec.title;
+    if (key === lastKey) return;
+
+    const list = load();
+    const same = list.find(r=> r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+    if (same){ same.stockQty = (n(same.stockQty)||0) + (n(rec.stockQty)||1); }
+    else { list.push((structuredClone?structuredClone(rec):JSON.parse(JSON.stringify(rec)))); }
+    save(list);
+    lastKey = key;
+    render();
+    try{
+      const t=document.createElement('div');
+      t.textContent='Tillagd i register ✅';
+      Object.assign(t.style,{position:'fixed',right:'12px',bottom:'12px',background:'#eef7ff',border:'1px solid #bcd',padding:'8px 12px',borderRadius:'8px',zIndex:99999});
+      document.body.appendChild(t); setTimeout(()=>t.remove(),1300);
+    }catch(_){}
+  }
+
+  // Lyssna på fälten där metadata hamnar
+  ['ean','artist','album','title'].forEach(id=>{
+    ['input','change'].forEach(evt=>{
+      document.addEventListener(evt, e=>{
+        if (e.target && e.target.id===id) {
+          clearTimeout(autoAddIfReady._t);
+          autoAddIfReady._t = setTimeout(autoAddIfReady, 200);
+        }
+      }, true);
+    });
+  });
+
+  /* --- Koppla in Spara-knappen (om den finns) --- */
+  document.addEventListener('click', e=>{
+    const btn = e.target.closest('#btnSave, .btn-save, button[type="submit"], input[type="submit"]');
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    if (!storageOK()) { setBadge(0, false); return; }
+    const list = load(); const rec = buildFromForm();
+    const same = list.find(r=> r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+    if (same){ same.stockQty = (n(same.stockQty)||0) + (n(rec.stockQty)||1); }
+    else { list.push((structuredClone?structuredClone(rec):JSON.parse(JSON.stringify(rec)))); }
+    save(list); render();
+  }, true);
+
+  /* --- Rendera när data ändras på något sätt --- */
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const cnt = migrateKeys(); // få med gamla data om de låg på annan nyckel
+    render();
+    // extra försök (mobil/seg DOM)
+    setTimeout(render, 400);
+    setTimeout(render, 1200);
+    setTimeout(render, 2500);
+  });
+  window.addEventListener('storage', e=>{ if(e.key===KEY) render(); });
+  try{
+    const _set = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = function(k,v){
+      const r = _set(k,v);
+      // Om någon lägger på annan nyckel med "vinyl|record" → kopiera till KEY
+      if (/vinyl|record|skiva|register/i.test(k) && k!==KEY){
+        try{
+          const cand = JSON.parse(v||'[]');
+          if (Array.isArray(cand)) {
+            const base = load();
+            cand.forEach(rec=>{
+              if (!rec) return;
+              const hit = base.find(r=> r && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+              if (!hit) base.push(rec);
+            });
+            save(base);
+          }
+        }catch(_){}
+      }
+      if (k === KEY) { try{ render(); }catch(_){ } }
+      return r;
+    };
+  }catch(_){}
+
+  /* --- Dölj trasig omslagsikon i metadata-rutan --- */
+  const thumb = document.getElementById('thumb');
+  if (thumb){
+    thumb.addEventListener('error', ()=>{ thumb.removeAttribute('src'); thumb.style.display='none'; }, {once:false});
+  }
+})();
+</script>
