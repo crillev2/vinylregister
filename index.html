@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Scanner</title>
+  <title>Vinylregister – Scanner (manuell stängning)</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; --chip:#f6f6f6; }
     * { box-sizing: border-box; }
@@ -35,7 +35,7 @@
     .scanner-card{ width:min(640px, 96vw); background:#000; border-radius:16px; overflow:hidden; border:1px solid #333; }
     .scanner-video{ width:100%; max-height:60vh; background:#000; }
     .scanner-bar{ display:flex; gap:8px; padding:8px; background:#111; color:#fff; align-items:center; justify-content:space-between; }
-    .scanner-status{ font-size:.9rem; opacity:.8; }
+    .scanner-status{ font-size:.9rem; opacity:.9; }
   </style>
 
   <!-- Fallback: göm EAN även utan JS (EAN är kolumn 6) -->
@@ -81,6 +81,7 @@
     </div>
     <div class="row-actions">
       <button class="vr-btn" id="btnScan">Skanna streckkod</button>
+      <button class="vr-btn" id="btnUse">Använd</button>
       <button class="vr-btn" id="btnSave">Spara</button>
       <span class="muted">Tips: öppna sidan med <code>?demo=1</code> för testposter.</span>
     </div>
@@ -116,7 +117,7 @@
     <div class="scanner-card">
       <video id="scannerVideo" class="scanner-video" autoplay playsinline></video>
       <div class="scanner-bar">
-        <div class="scanner-status" id="scannerStatus">Initierar kamera…</div>
+        <div class="scanner-status" id="scannerStatus">Kamera initieras…</div>
         <div style="display:flex; gap:8px;">
           <button class="vr-btn" id="btnTorch" title="Ficklampa">Ficklampa</button>
           <button class="vr-btn" id="btnCloseScanner">Stäng</button>
@@ -129,28 +130,17 @@
   (function(){
     "use strict";
 
-    /* --- UI helpers --- */
     const $ = (s,r=document)=>r.querySelector(s);
     const n = v => Number(v||0)||0;
 
-    /* --- data store --- */
-    function loadList(){
-      try{ const raw=localStorage.getItem("vinyl_records"); const arr=raw?JSON.parse(raw):[]; return Array.isArray(arr)?arr:[]; }catch(_){ return []; }
-    }
+    function loadList(){ try{ const raw=localStorage.getItem("vinyl_records"); const arr=raw?JSON.parse(raw):[]; return Array.isArray(arr)?arr:[]; }catch(_){ return []; } }
     function saveList(list){ try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){ } }
 
-    /* --- render register --- */
-    function daysBetween(d1, d2){
-      const a = (d1 instanceof Date) ? d1 : new Date(d1);
-      const b = (d2 instanceof Date) ? d2 : new Date(d2);
-      if(isNaN(a) || isNaN(b)) return "";
-      return Math.floor(Math.abs(b-a)/(1000*60*60*24));
-    }
+    function daysBetween(d1, d2){ const a=(d1 instanceof Date)?d1:new Date(d1); const b=(d2 instanceof Date)?d2:new Date(d2); if(isNaN(a)||isNaN(b))return ""; return Math.floor(Math.abs(b-a)/(1000*60*60*24)); }
+
     function renderRegisterTable(){
       const tb = $("#registerTable tbody"); if(!tb) return;
-      const list = loadList();
-      tb.innerHTML = "";
-      const today = new Date();
+      const list = loadList(); tb.innerHTML = ""; const today = new Date();
       list.forEach(rec=>{
         const tr = document.createElement("tr");
         const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : "";
@@ -174,7 +164,7 @@
 
     function buildRecordFromForm(){
       return {
-        id: (crypto&&crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+        id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
         artist: $("#artist")?.value?.trim() || "",
         title:  $("#album")?.value?.trim()  || "",
         year:   $("#year")?.value || "",
@@ -188,6 +178,7 @@
         thumbUrl: $("#thumb")?.src || ""
       };
     }
+
     function mergeOrPush(list, rec){
       const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
       if (same){ same.stockQty = (n(same.stockQty) + (rec.stockQty||1)); return list; }
@@ -209,22 +200,12 @@
       });
     });
 
-    /* --- install demo if requested --- */
-    (function(){
-      const params=new URLSearchParams(location.search);
-      if(!params.has("demo")) return;
-      const demo=[
-        { id:"1", artist:"Deep Purple", title:"Burn", year:"1974", format:"LP", ean:"1234567890123", purchaseDate:"2025-06-01", purchasePrice:80, askPrice:120, paidPrice:100, stockQty:1, thumbUrl:"" },
-        { id:"2", artist:"Led Zeppelin", title:"IV", year:"1971", format:"LP", ean:"2345678901234", purchaseDate:"2025-04-10", purchasePrice:120, askPrice:180, paidPrice:0, stockQty:1, thumbUrl:"" }
-      ];
-      saveList(demo);
-    })();
-
-    /* ===================== BARCODE SCANNER ===================== */
+    // ====== BARCODE SCANNER (manuell stängning) ======
     const overlay = $("#scannerOverlay");
     const video   = $("#scannerVideo");
     const status  = $("#scannerStatus");
     const btnScan = $("#btnScan");
+    const btnUse  = $("#btnUse");
     const btnClose= $("#btnCloseScanner");
     const btnTorch= $("#btnTorch");
 
@@ -233,6 +214,8 @@
     let reader = null; // ZXing fallback
     let useBarcodeDetector = 'BarcodeDetector' in window;
     let detector = null;
+    let lastCode = "";
+    let lastAt = 0;
     let stopped = true;
 
     function setStatus(msg){ if(status) status.textContent = msg; }
@@ -240,12 +223,11 @@
     function hideOverlay(){ overlay.style.display = "none"; overlay.setAttribute('aria-hidden','true'); }
 
     async function startScanner(){
-      stopped = false;
-      showOverlay();
-      setStatus("Startar kamera…");
+      stopped = false; lastCode=""; lastAt=0;
+      showOverlay(); setStatus("Startar kamera…");
 
       try{
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio:false });
         video.srcObject = stream;
         await video.play();
       }catch(e){
@@ -254,11 +236,8 @@
       }
 
       if(useBarcodeDetector){
-        try{
-          detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128'] });
-        }catch(_){
-          useBarcodeDetector = false;
-        }
+        try{ detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128'] }); }
+        catch(_){ useBarcodeDetector = false; }
       }
 
       if(useBarcodeDetector){
@@ -304,7 +283,7 @@
         const results = await detector.detect(video);
         if(results && results.length){
           const raw = results[0].rawValue || results[0].rawValueText || "";
-          if(raw){ onDetected(raw); return; }
+          if(raw){ onDetected(raw); }
         }
       }catch(_){ /* ignore */ }
       rafId = requestAnimationFrame(detectLoop);
@@ -322,18 +301,27 @@
     }
 
     function onDetected(code){
-      $("#ean").value = code;
-      document.dispatchEvent(new CustomEvent("ean-scanned", { detail: { ean: code } }));
-      setStatus("Hittade: " + code);
-      // stäng efter kort delay
-      setTimeout(closeScanner, 250);
+      const now = Date.now();
+      if(code === lastCode && (now - lastAt) < 1200) return; // throttla dubletter
+      lastCode = code; lastAt = now;
+      setStatus("Hittade: " + code + " (lämna öppet om du vill skanna igen)");
+      if ('vibrate' in navigator) try{ navigator.vibrate(60); }catch(_){}
+      // fyll fält men stäng inte – användaren kan skanna flera
+      const eanEl = $("#ean"); if(eanEl) eanEl.value = code;
     }
 
     btnScan?.addEventListener("click", startScanner);
     btnClose?.addEventListener("click", closeScanner);
     btnTorch?.addEventListener("click", toggleTorch);
+    btnUse?.addEventListener("click", function(){
+      // "Använd" stänger bara skannern – ean är redan ifylld
+      closeScanner();
+    });
 
-    /* init */
+    document.addEventListener("visibilitychange", function(){
+      if(document.hidden) closeScanner();
+    });
+
     document.addEventListener("DOMContentLoaded", renderRegisterTable);
   })();
   </script>
