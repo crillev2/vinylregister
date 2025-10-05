@@ -54,7 +54,110 @@
     })();
   </script>
 </head>
-<body>
+<script>
+/* ==== AUTO-ADD EFTER METADATA v1 ==== */
+(function(){
+  "use strict";
+  const $ = (s,r=document)=>r.querySelector(s);
+  const n = v => Number(v||0)||0;
+
+  // läs/skriv lista
+  function loadList(){ try{ const raw=localStorage.getItem("vinyl_records"); const arr=raw?JSON.parse(raw):[]; return Array.isArray(arr)?arr:[]; }catch(_){ return []; } }
+  function saveList(list){ try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){ } }
+
+  // bygg post från skärmen
+  function buildRecordFromForm(){
+    return {
+      id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
+      artist: $("#artist")?.value?.trim() || "",
+      title:  $("#album")?.value?.trim()  || "",
+      year:   $("#year")?.value || "",
+      format: $("#format")?.value || "",
+      ean:    $("#ean")?.value || "",
+      purchaseDate: $("#purchaseDate")?.value || "",
+      purchasePrice: n($("#purchasePrice")?.value),
+      askPrice:      n($("#askPrice")?.value),
+      paidPrice:     n($("#paidPrice")?.value),
+      stockQty:      n($("#stockQty")?.value) || 1,
+      thumbUrl: $("#thumb")?.src || ""
+    };
+  }
+
+  // merge eller lägg till ny rad
+  function mergeOrPush(list, rec){
+    const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+    if (same){ same.stockQty = (n(same.stockQty) + (rec.stockQty||1)); return list; }
+    const clone = (structuredClone ? structuredClone(rec) : JSON.parse(JSON.stringify(rec)));
+    list.push(clone); return list;
+  }
+
+  // enkel render (om din inbyggda render finns, låt den sköta det)
+  function renderNow(){
+    if (typeof window.renderRegisterTable === "function"){ try{ window.renderRegisterTable(); return; }catch(_){ } }
+    const tb = document.querySelector("#registerTable tbody"); if(!tb) return;
+    const list = loadList(); tb.innerHTML = "";
+    const today = new Date();
+    function daysBetween(d1, d2){ const a=new Date(d1), b=new Date(d2); return (isNaN(a)||isNaN(b))? "": Math.floor(Math.abs(b-a)/(1000*60*60*24)); }
+    list.forEach(rec=>{
+      const tr = document.createElement("tr");
+      const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : "";
+      const margin = (n(rec.paidPrice) && n(rec.purchasePrice)) ? (n(rec.paidPrice)-n(rec.purchasePrice)) : "";
+      tr.innerHTML =
+        `<td>${rec.thumbUrl?`<img src="${rec.thumbUrl}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #ddd">`:""}</td>
+         <td>${rec.artist||""}</td>
+         <td>${rec.title||""}</td>
+         <td>${rec.year||""}</td>
+         <td>${rec.format||""}</td>
+         <td class="col-ean">${rec.ean||""}</td>
+         <td class="right">${dgl}</td>
+         <td class="right">${rec.purchasePrice||""}</td>
+         <td class="right">${rec.paidPrice||""}</td>
+         <td class="right">${margin}</td>
+         <td class="right">—</td>`;
+      tb.appendChild(tr);
+    });
+  }
+
+  // liten notis
+  function toast(msg){
+    const t=document.createElement('div');
+    t.textContent=msg;
+    Object.assign(t.style,{position:"fixed",right:"12px",bottom:"12px",background:"#eef7ff",border:"1px solid #bcd",padding:"8px 12px",borderRadius:"8px",zIndex:99999});
+    document.body.appendChild(t); setTimeout(()=>t.remove(),1400);
+  }
+
+  // auto-add när EAN + (Artist eller Album) finns
+  let lastSavedEAN = "";
+  function maybeAutoAdd(){
+    const ean   = $("#ean")?.value?.trim() || "";
+    const artist= $("#artist")?.value?.trim() || "";
+    const album = $("#album")?.value?.trim() || "";
+    if (!ean) return;
+    if (!(artist || album)) return;
+    if (ean === lastSavedEAN) return; // spara bara en gång per skanning
+
+    const rec = buildRecordFromForm();
+    const list = loadList(); mergeOrPush(list, rec); saveList(list);
+    lastSavedEAN = ean;
+    renderNow();
+    toast("Tillagd i register ✅");
+  }
+
+  // Trigga när metadata fylls i (artist/album uppdateras)
+  ["input","change"].forEach(evt=>{
+    document.addEventListener(evt, (e)=>{
+      if (e.target && ["ean","artist","album"].includes(e.target.id)) {
+        setTimeout(maybeAutoAdd, 150); // vänta en kort stund så fälten hinner uppdateras
+      }
+    }, true);
+  });
+
+  // som extra säkerhet – kör en gång 2 sekunder efter att sidan laddat (om fält redan är ifyllda)
+  document.addEventListener("DOMContentLoaded", ()=> setTimeout(maybeAutoAdd, 2000));
+})();
+</script>
+
+  <body>
 
   <nav class="vr-nav">
     <button class="vr-btn" onclick="location.href='#register'">Register</button>
