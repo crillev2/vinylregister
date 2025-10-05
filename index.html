@@ -119,38 +119,28 @@
         tbl.tHead.rows[0].cells[idx].classList.add('col-ean');
         Array.from(tbl.tBodies).forEach(tbody=> Array.from(tbody.rows).forEach(tr=> tr.cells[idx] && tr.cells[idx].classList.add('col-ean')));
       }
-
-      function render(){
-        const ok=storageOK();
-        const list=load();
-        setBadge(`Minimal • ${list.length} poster • ${ok?'✅ lagring':'⚠️ ingen lagring'}`);
-        $('#keysInfo').textContent = 'Nycklar: ' + (listKeysInfo() || '—');
-
-        const tb=$('#registerTable tbody'); tb.innerHTML='';
-        const today = new Date();
-        list.forEach(rec=>{
-          if(!rec.id) rec.id = (crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random());
-          const tr=document.createElement('tr');
-          const margin=(n(rec.paidPrice)&&n(rec.purchasePrice))?(n(rec.paidPrice)-n(rec.purchasePrice)):'';
-          const dgl=rec.purchaseDate?daysBetween(rec.purchaseDate,today):'';
-          tr.innerHTML = `
-            <td>${rec.artist||''}</td>
-            <td>${rec.title||''}</td>
-            <td>${rec.year||''}</td>
-            <td>${rec.format||''}</td>
-            <td class="col-ean">${rec.ean||''}</td>
-            <td class="right">${dgl}</td>
-            <td class="right">${rec.purchasePrice||''}</td>
-            <td class="right">${rec.paidPrice||''}</td>
-            <td class="right">${margin}</td>
-            <td class="right">
-              <button class="btn" data-act="edit" data-id="${rec.id}">Redigera</button>
-              <button class="btn danger" data-act="del" data-id="${rec.id}">Ta bort</button>
-            </td>`;
-          tb.appendChild(tr);
-        });
-        hideEANColumn($('#registerTable'));
+<script>
+(function(){
+  const KEY='vinyl_records';
+  try{
+    const raw = localStorage.getItem(KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(list) && list.length){
+      let changed=false;
+      for (let i=0;i<list.length;i++){
+        if (!list[i].id){
+          list[i].id = (crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random());
+          changed = true;
+        }
       }
+      if (changed) localStorage.setItem(KEY, JSON.stringify(list));
+    }
+  }catch(_){}
+  try{ window.render && window.render(); }catch(_){}
+})();
+</script>
+
+ 
 
       function buildFromForm(){
         return {
