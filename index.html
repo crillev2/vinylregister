@@ -1,157 +1,257 @@
-<!-- === HOTFIX v4 – flytt av prisfält + säkert spar + sista-minuten-korrigering === -->
-<script>
-(function(){
-  "use strict";
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vinylregister – Färsk index</title>
+  <style>
+    :root { --fg:#111; --muted:#666; --line:#e5e5e5; --bg:#fff; --chip:#f6f6f6; }
+    * { box-sizing: border-box; }
+    body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--fg); background:var(--bg); margin:16px; }
+    h1{ margin: 0 0 12px; }
+    .vr-nav{ display:flex; gap:8px; align-items:center; margin:8px 0 16px; }
+    .vr-btn{ border:1px solid var(--line); border-radius:12px; padding:8px 12px; background:var(--chip); cursor:pointer; }
+    .vr-btn:hover{ background:#eee; }
+    .metadata-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin:12px 0 16px; }
+    .field{ display:flex; flex-direction:column; gap:6px; }
+    .field span{ font-size:0.9rem; color:var(--muted); }
+    .manual-field{ background:#f8fbff; border:1px solid #dbe7ff; border-radius:8px; padding:8px; }
+    .manual-field:focus{ outline:2px solid #9ec5ff; background:#fff; }
+    .row-actions{ display:flex; gap:8px; justify-content:flex-end; }
+    .vr-thumb{ width:48px; height:48px; object-fit:cover; border-radius:6px; border:1px solid #ddd; }
+    .wrap{ border:1px solid var(--line); border-radius:12px; padding:12px; margin:12px 0; }
+    .muted{ color:var(--muted); }
+    .table-wrap{ border:1px solid var(--line); border-radius:12px; overflow:auto; }
+    table{ width:100%; border-collapse:collapse; }
+    th, td{ padding:10px; border-bottom:1px solid #f0f0f0; text-align:left; }
+    th{ background:#fafafa; }
+    td.right, th.right{ text-align:right; }
+    .col-ean{ display:none !important; } /* döljer EAN-kolumnen */
+    #quickSearch{ width:100%; margin:8px 0 12px; }
+    @media (max-width: 900px){ .metadata-grid{ grid-template-columns:1fr; } }
+  </style>
+  <!-- Fallback: göm EAN även utan JS (EAN är kolumn 6) -->
+  <style>
+    table:has(th[data-col="ean"]) th[data-col="ean"],
+    table:has(th[data-col="ean"]) tbody td:nth-child(6) { display:none !important; }
+  </style>
+</head>
+<body>
 
-  /* kvitto att rätt hotfix kör */
-  try{
-    const tag = document.createElement('div');
-    tag.textContent = "Patch v4 aktiv";
-    Object.assign(tag.style,{position:'fixed',left:'12px',bottom:'12px',background:'#F0FFF5',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
-    document.body.appendChild(tag); setTimeout(()=>tag.remove(),1500);
-  }catch(e){}
+  <nav class="vr-nav">
+    <button class="vr-btn" onclick="location.href='#register'">Register</button>
+    <button class="vr-btn" onclick="location.href='rapport.html'">Rapport</button>
+  </nav>
 
-  const $  = (s,r=document)=>r.querySelector(s);
-  const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
-  const n  = v => Number(v||0)||0;
+  <h1>Vinylregister</h1>
 
-  /* === 1) Flytta/ skapa prisfält i metadata före tabellen === */
-  function getRegisterTable(){
-    return $("#registerTable") || $$("table").find(t=>{
-      const ths = t.tHead ? Array.from(t.tHead.rows[0].cells).map(c=>(c.textContent||"").toLowerCase()) : [];
-      return ths.includes("artist") && (ths.includes("album") || ths.includes("titel"));
-    });
-  }
-  function ensureMetaSectionAndMoveFields(){
-    const tbl = getRegisterTable(); if(!tbl) return;
-    let host = $("#vr-meta"); if(!host){ host=document.createElement("div"); host.id="vr-meta"; host.className="metadata-grid"; tbl.parentNode.insertBefore(host,tbl); }
+  <div class="wrap">
+    <h2>Metadata</h2>
+    <div class="metadata-grid" id="vr-meta">
+      <label class="field"><span>Artist</span><input id="artist" class="manual-field" type="text" placeholder="Ex. Deep Purple"></label>
+      <label class="field"><span>Album</span><input id="album" class="manual-field" type="text" placeholder="Ex. Burn"></label>
+      <label class="field"><span>År</span><input id="year" class="manual-field" type="number" step="1"></label>
+      <label class="field"><span>Format</span><input id="format" class="manual-field" type="text" placeholder="LP/EP/12&quot;"></label>
+      <label class="field"><span>EAN</span><input id="ean" class="manual-field" type="text" placeholder="Streckkod"></label>
+      <label class="field"><span>Inköpsdatum</span><input id="purchaseDate" class="manual-field" type="date"></label>
+      <label class="field"><span>Inköpspris</span><input id="purchasePrice" class="manual-field" type="number" step="1"></label>
+      <label class="field"><span>Begärt pris</span><input id="askPrice" class="manual-field" type="number" step="1"></label>
+      <label class="field"><span>Antal</span><input id="stockQty" class="manual-field" type="number" step="1" value="1"></label>
+      <label class="field"><span>Omslag</span><img id="thumb" class="vr-thumb" alt="cover"></label>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="vr-btn" id="btnSave">Spara</button>
+      <span class="muted">Tips: öppna sidan med <code>?demo=1</code> för testposter.</span>
+    </div>
+  </div>
 
-    function moveOrCreate(id,label,type){
-      let input = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
-      let wrap = input && input.closest && input.closest("label.field");
-      if(!wrap){ wrap=document.createElement("label"); wrap.className="field"; const span=document.createElement("span"); span.textContent=label; wrap.appendChild(span); }
-      if(!input){ input=document.createElement("input"); input.id=id; input.name=id; input.type=type; if(type==="number") input.step="1"; }
-      input.classList.add("manual-field");
-      if(!host.contains(wrap)) host.appendChild(wrap);
-      if(!wrap.contains(input)) wrap.appendChild(input);
-    }
-    moveOrCreate("purchasePrice","Inköpspris","number");
-    moveOrCreate("askPrice","Begärt pris","number");
-    moveOrCreate("purchaseDate","Inköpsdatum","date");
-    const paid = document.getElementById("paidPrice") || document.querySelector('[name="paidPrice"]');
-    if(paid){ let w=paid.closest("label.field"); if(!w){ w=document.createElement("label"); w.className="field"; const s=document.createElement("span"); s.textContent="Faktiskt betalt"; w.appendChild(s); } if(!host.contains(w)) host.appendChild(w); if(!w.contains(paid)) w.appendChild(paid); paid.classList.add("manual-field"); }
+  <div class="wrap" id="register">
+    <h2>Register</h2>
+    <input id="quickSearch" class="manual-field" type="search" placeholder="Sök artist/titel/EAN…">
+    <div class="table-wrap">
+      <table id="registerTable">
+        <thead>
+          <tr>
+            <th>Bild</th>
+            <th>Artist</th>
+            <th>Album</th>
+            <th>År</th>
+            <th>Format</th>
+            <th data-col="ean" class="col-ean">EAN</th>
+            <th class="right">Dagar</th>
+            <th class="right">Inköp</th>
+            <th class="right">Sålt</th>
+            <th class="right">Marginal</th>
+            <th class="right">Åtgärd</th>
+          </tr>
+        </thead>
+        <tbody><!-- renderas av JS --></tbody>
+      </table>
+    </div>
+  </div>
 
-    /* städa ev. dubletter under tabellen */
-    let el = tbl.nextElementSibling;
-    while(el){
-      ["purchasePrice","askPrice","paidPrice","purchaseDate"].forEach(id=>{
-        const stray = el.querySelector && (el.querySelector("#"+id) || el.querySelector(`[name="${id}"]`));
-        if(stray){ const w = stray.closest && stray.closest("label.field"); if(w && !host.contains(w)) w.remove(); else if(!host.contains(stray)) stray.remove(); }
-      });
-      el = el.nextElementSibling;
-    }
-  }
+  <!-- === ALL-IN-ONE skript (render, spara, EAN-dölj, snabbsök, demo) === -->
+  <script>
+  (function(){
+    "use strict";
 
-  /* === 2) Läs fält från skärmen & bygg post === */
-  function getVal(...ids){
-    for(const id of ids){ const el=document.getElementById(id)||document.querySelector(`[name="${id}"]`); if(el && (el.value??"")!=="") return el.value; }
-    return "";
-  }
-  function getText(...sels){
-    for(const s of sels){ const el=document.querySelector(s); if(el && (el.textContent??"")!=="") return el.textContent; }
-    return "";
-  }
-  function getThumb(){ const el=$("#thumb")||$(".thumb img")||$("img[data-role='thumb']"); return el?el.src:""; }
-
-  function buildRecordFromDOM(){
-    return {
-      id: (crypto&&crypto.randomUUID)? crypto.randomUUID() : String(Date.now()),
-      artist: getVal("artist","Artist") || getText("#scan-artist"),
-      title:  getVal("album","title","Album","Titel") || getText("#scan-title"),
-      year:   getVal("year","År"),
-      format: getVal("format","Format"),
-      ean:    getVal("ean","EAN","barcode") || getText("#scan-ean"),
-      purchaseDate: getVal("purchaseDate","inkopsdatum","Inköpsdatum"),
-      purchasePrice: n(getVal("purchasePrice")),
-      askPrice:      n(getVal("askPrice")),
-      paidPrice:     n(getVal("paidPrice")),
-      stockQty:      n(getVal("stockQty","antal")) || 1,
-      thumbUrl: getThumb()
-    };
-  }
-
-  /* === 3) Datalager & merge (vill du aldrig slå ihop: sätt ALWAYS_NEW=true) === */
-  const ALWAYS_NEW = false; // sätt true om du ALLTID vill ha en ny rad även med samma EAN/artist/titel
-  function loadList(){ try{ const raw=localStorage.getItem("vinyl_records"); const arr=raw?JSON.parse(raw):[]; return Array.isArray(arr)?arr:[]; }catch(_){ return []; } }
-  function saveList(list){ try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){ } }
-  function mergeOrPush(list, rec){
-    if(ALWAYS_NEW){ list.push(structuredClone?structuredClone(rec):JSON.parse(JSON.stringify(rec))); return list; }
-    const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
-    if (same){ same.stockQty = (n(same.stockQty) + (rec.stockQty||1)); return list; }
-    list.push(structuredClone?structuredClone(rec):JSON.parse(JSON.stringify(rec)));
-    return list;
-  }
-
-  /* === 4) Hård takeover av spara (klick, submit, Enter) === */
-  const SAVE_SELECTOR = '#btnSave, .btn-save, .save, button[type="submit"], input[type="submit"], button[onclick*="save"]';
-  let saving=false;
-  function doSave(ev){
-    if(saving) return; saving=true;
+    /* kvitto att rätt fil körs */
     try{
-      if(ev){ ev.preventDefault(); ev.stopPropagation(); if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); }
-      const rec = buildRecordFromDOM();
-      const list = loadList(); mergeOrPush(list, rec); saveList(list);
-      if (typeof window.renderRegisterTable === "function"){ try{ window.renderRegisterTable(); }catch(_){} }
-      const note=document.createElement("div"); note.textContent="Sparat ✅";
-      Object.assign(note.style,{position:"fixed",right:"12px",bottom:"12px",background:"#eef7ff",border:"1px solid #bcd",padding:"8px 12px",borderRadius:"8px",zIndex:99999});
-      document.body.appendChild(note); setTimeout(()=>note.remove(),1200);
-    } finally { setTimeout(()=>saving=false,50); }
-  }
-  document.addEventListener("click", e=>{ const b=e.target.closest(SAVE_SELECTOR); if(b) doSave(e); }, true);
-  document.addEventListener("submit", e=> doSave(e), true);
-  document.addEventListener("keydown", e=>{ if(e.key==="Enter"){ const f=e.target.closest("form"); if(f){ doSave(e); } } }, true);
+      const tag = document.createElement('div');
+      tag.textContent = "Ny index aktiv";
+      Object.assign(tag.style, {position:'fixed',left:'12px',bottom:'12px',background:'#F0FFF5',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
+      document.body.appendChild(tag);
+      setTimeout(()=>tag.remove(), 1200);
+    }catch(e){}
 
-  /* === 5) Sista-minuten-korrigering: om appen ändå sparar “fel”, rätta sista posten === */
-  try{
-    const _set = localStorage.setItem.bind(localStorage);
-    localStorage.setItem = function(k,v){
-      if(k==="vinyl_records"){
+    const $  = (s,r=document)=>r.querySelector(s);
+    const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+    const n  = v => Number(v||0)||0;
+
+    function daysBetween(d1, d2){
+      const a = (d1 instanceof Date) ? d1 : new Date(d1);
+      const b = (d2 instanceof Date) ? d2 : new Date(d2);
+      if(isNaN(a) || isNaN(b)) return "";
+      return Math.floor(Math.abs(b-a)/(1000*60*60*24));
+    }
+
+    function loadList(){
+      try{
+        const raw = localStorage.getItem("vinyl_records");
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      }catch(_){ return []; }
+    }
+    function saveList(list){
+      try{ localStorage.setItem("vinyl_records", JSON.stringify(list)); }catch(_){}
+    }
+
+    function renderRegisterTable(){
+      const tb = $("#registerTable tbody");
+      if(!tb) return;
+      const list = loadList();
+      tb.innerHTML = "";
+      const today = new Date();
+
+      list.forEach(rec=>{
+        const tr = document.createElement("tr");
+        const dgl = rec.purchaseDate ? daysBetween(rec.purchaseDate, today) : "";
+        const margin = (n(rec.paidPrice) && n(rec.purchasePrice)) ? (n(rec.paidPrice)-n(rec.purchasePrice)) : "";
+
+        tr.innerHTML = \`
+          <td>\${ rec.thumbUrl ? \`<img src="\${rec.thumbUrl}" class="vr-thumb" alt="">\` : "" }</td>
+          <td>\${ rec.artist||"" }</td>
+          <td>\${ rec.title||"" }</td>
+          <td>\${ rec.year||"" }</td>
+          <td>\${ rec.format||"" }</td>
+          <td class="col-ean">\${ rec.ean||"" }</td>
+          <td class="right">\${ dgl }</td>
+          <td class="right">\${ rec.purchasePrice||"" }</td>
+          <td class="right">\${ rec.paidPrice||"" }</td>
+          <td class="right">\${ margin }</td>
+          <td class="right">—</td>
+        ";
+        tb.appendChild(tr);
+      });
+
+      hideEANColumn();
+    }
+
+    function hideEANColumn(){
+      const tbl = $("#registerTable");
+      if(!tbl || !tbl.tHead || !tbl.tHead.rows.length) return;
+      const headers = Array.from(tbl.tHead.rows[0].cells);
+      let idx = headers.findIndex(th => th.getAttribute("data-col")==="ean" || (th.textContent||"").trim().toLowerCase()==="ean");
+      if(idx<0) return;
+      headers[idx].classList.add("col-ean");
+      Array.from(tbl.tBodies).forEach(tbody=>{
+        Array.from(tbody.rows).forEach(tr=>{
+          const c = tr.cells[idx];
+          if(c) c.classList.add("col-ean");
+        });
+      });
+    }
+
+    function buildRecordFromForm(){
+      return {
+        id: (crypto&&crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+        artist: $("#artist")?.value?.trim() || "",
+        title:  $("#album")?.value?.trim()  || "",
+        year:   $("#year")?.value || "",
+        format: $("#format")?.value || "",
+        ean:    $("#ean")?.value || "",
+        purchaseDate: $("#purchaseDate")?.value || "",
+        purchasePrice: n($("#purchasePrice")?.value),
+        askPrice:      n($("#askPrice")?.value),
+        paidPrice:     n($("#paidPrice")?.value),
+        stockQty:      n($("#stockQty")?.value) || 1,
+        thumbUrl: $("#thumb")?.src || ""
+      };
+    }
+
+    function mergeOrPush(list, rec){
+      const same = list.find(r => r && r.ean && rec.ean && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+      if (same){ same.stockQty = (n(same.stockQty) + (rec.stockQty||1)); return list; }
+      const clone = (structuredClone ? structuredClone(rec) : JSON.parse(JSON.stringify(rec)));
+      list.push(clone);
+      return list;
+    }
+
+    function wireSave(){
+      const btn = $("#btnSave");
+      if(!btn) return;
+      btn.addEventListener("click", function(ev){
+        ev.preventDefault();
+        const rec = buildRecordFromForm();
+        const list = loadList();
+        mergeOrPush(list, rec);
+        saveList(list);
+        renderRegisterTable();
         try{
-          const arr = JSON.parse(v);
-          if(Array.isArray(arr) && arr.length){
-            const last = arr[arr.length-1] || {};
-            const now  = buildRecordFromDOM();
-            // Om det som står på skärmen ser annorlunda ut → skriv över sista raden med skärm-värden
-            if( (now.artist && now.artist!==last.artist) || (now.title && now.title!==last.title) || (now.ean && now.ean!==last.ean) ){
-              arr[arr.length-1] = Object.assign({}, last, now);
-              v = JSON.stringify(arr);
-              console.warn("[v4] Korrigerade sista posten till aktuella formulärvärden");
-            }
-          }
+          const note = document.createElement("div");
+          note.textContent = "Sparat ✅";
+          Object.assign(note.style,{position:"fixed",right:"12px",bottom:"12px",background:"#eef7ff",border:"1px solid #bcd",padding:"8px 12px",borderRadius:"8px",zIndex:99999});
+          document.body.appendChild(note); setTimeout(()=>note.remove(), 1200);
         }catch(_){}
-      }
-      return _set(k,v);
-    };
-  }catch(_){}
+      });
+    }
 
-  /* === 6) Se till att EAN-kolumnen är gömd även om JS hinner sent === */
-  function hideEANColumn(){
-    const tbl = getRegisterTable(); if(!tbl||!tbl.tHead||!tbl.tHead.rows.length) return;
-    const headers = Array.from(tbl.tHead.rows[0].cells);
-    const idx = headers.findIndex(th => th.getAttribute("data-col")==="ean" || (th.textContent||"").trim().toLowerCase()==="ean");
-    if(idx<0) return;
-    headers[idx].classList.add("col-ean");
-    Array.from(tbl.tBodies).forEach(tb=> Array.from(tb.rows).forEach(tr=> tr.cells[idx] && tr.cells[idx].classList.add("col-ean")));
-  }
+    function wireSearch(){
+      const box = $("#quickSearch");
+      const tb  = $("#registerTable tbody");
+      if(!box || !tb) return;
+      box.addEventListener("input", function(){
+        const q = this.value.toLowerCase();
+        tb.querySelectorAll("tr").forEach(tr=>{
+          tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none";
+        });
+      });
+    }
 
-  /* === 7) Körning + observationer === */
-  document.addEventListener("DOMContentLoaded", function(){
-    ensureMetaSectionAndMoveFields();
-    hideEANColumn();
-  });
-  if(window.MutationObserver){
-    new MutationObserver(()=>{ ensureMetaSectionAndMoveFields(); hideEANColumn(); })
-      .observe(document.body,{childList:true,subtree:true});
-  }
-})();
-</script>
+    function installDemoIfRequested(){
+      const params = new URLSearchParams(location.search);
+      if(!params.has("demo")) return;
+      const demo = [
+        { id:"1", artist:"Deep Purple", title:"Burn", year:"1974", format:"LP", ean:"123", purchaseDate:"2025-06-01", purchasePrice:80, askPrice:120, paidPrice:100, stockQty:1, thumbUrl:"" },
+        { id:"2", artist:"Led Zeppelin", title:"IV", year:"1971", format:"LP", ean:"456", purchaseDate:"2025-04-10", purchasePrice:120, askPrice:180, paidPrice:0, stockQty:1, thumbUrl:"" },
+        { id:"3", artist:"Dire Straits", title:"Sultans of Swing", year:"1978", format:"7\"", ean:"789", purchaseDate:"2025-03-15", purchasePrice:40, askPrice:90, paidPrice:0, stockQty:3, thumbUrl:"" }
+      ];
+      saveList(demo);
+    }
+
+    document.addEventListener("DOMContentLoaded", function(){
+      installDemoIfRequested();
+      wireSave();
+      wireSearch();
+      renderRegisterTable();
+    });
+
+    if(window.MutationObserver){
+      new MutationObserver(()=> hideEANColumn())
+        .observe(document.body, {childList:true, subtree:true});
+    }
+  })();
+  </script>
+
+</body>
+</html>
