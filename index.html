@@ -941,6 +941,116 @@
   const iv = setInterval(()=>{ render(); if(--tries<=0) clearInterval(iv); }, 1000);
 })();
 </script>
+<script>
+/* ===== VR FIX v8 – storage-migrering + auto-add + force-render ===== */
+(function(){ 'use strict';
+  const KEY = 'vinyl_records';
+  const $  = (s,r=document)=>r.querySelector(s);
+  const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+  const n  = v => Number(v||0)||0;
+
+  /* --- Badge: visar antal + lagringsstatus --- */
+  let badge;
+  function setBadge(cnt, ok){
+    if(!badge){
+      badge=document.createElement('div');
+      Object.assign(badge.style,{position:'fixed',left:'12px',bottom:'12px',background:'#F0FFF5',border:'1px solid #9ad27e',padding:'4px 8px',borderRadius:'6px',fontSize:'12px',zIndex:99999});
+      document.body.appendChild(badge);
+    }
+    badge.textContent = `VR v8 • ${cnt} poster • ${ok?'✅ lagring':'⚠️ ingen lagring'}`;
+    clearTimeout(setBadge._t); setBadge._t=setTimeout(()=>badge&&badge.remove(), 5000);
+  }
+
+  /* --- Kan vi skriva till localStorage? --- */
+  function storageOK(){
+    try{ localStorage.setItem('__vr_test__','1'); localStorage.removeItem('__vr_test__'); return true; }
+    catch(e){ return false; }
+  }
+
+  /* --- Läs/Spara --- */
+  function load(){
+    try{
+      const raw = localStorage.getItem(KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    }catch(_){ return []; }
+  }
+  function save(arr){
+    try{ localStorage.setItem(KEY, JSON.stringify(arr)); }
+    catch(_){ /* ignore */ }
+  }
+
+  /* --- Migrera från ev. gamla nycklar till KEY (utan att radera dem) --- */
+  function migrateKeys(){
+    if (!storageOK()) return 0;
+    let merged = load();
+    try{
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k || k===KEY) continue;
+        // bara rimliga kandidater
+        if (!/vinyl|record|skiva|register/i.test(k)) continue;
+        try{
+          const arr = JSON.parse(localStorage.getItem(k) || '[]');
+          if (Array.isArray(arr) && arr.length){
+            // lägg in poster som inte redan finns (EAN+artist+title)
+            arr.forEach(rec=>{
+              if (!rec) return;
+              const hit = merged.find(r=> r && r.ean===rec.ean && r.artist===rec.artist && r.title===rec.title);
+              if (!hit) merged.push(rec);
+            });
+          }
+        }catch(_){}
+      }
+      save(merged);
+    }catch(_){}
+    return Array.isArray(merged) ? merged.length : 0;
+  }
+
+  /* --- Se till att register-tabellen finns --- */
+  function ensureRegister(){
+    let wrap = $('#register');
+    if(!wrap){
+      wrap = document.createElement('div');
+      wrap.id='register'; wrap.className='wrap';
+      wrap.innerHTML = `<h2>Register</h2>
+        <input id="quickSearch" class="manual-field" type="search" placeholder="Sök artist/titel/EAN…">
+        <div class="table-wrap">
+          <table id="registerTable"><thead><tr>
+            <th>Bild</th><th>Artist</th><th>Album</th><th>År</th><th>Format</th>
+            <th data-col="ean" class="col-ean">EAN</th><th class="right">Dagar</th>
+            <th class="right">Inköp</th><th class="right">Sålt</th><th class="right">Marginal</th><th class="right">Åtgärd</th>
+          </tr></thead><tbody></tbody></table>
+        </div>`;
+      document.body.appendChild(wrap);
+    }
+    const tbl = $('#registerTable');
+    if (tbl && !tbl.tBodies.length) tbl.appendChild(document.createElement('tbody'));
+  }
+
+  /* --- Av-göm allt under register (utom EAN-kolumnen) --- */
+  function unhide(){
+    const root = $('#register'); if(!root) return;
+    root.querySelectorAll('[style*="display"]').forEach(el=>{
+      if(!el.classList.contains('col-ean')) el.style.removeProperty('display');
+    });
+    root.querySelectorAll('[hidden]').forEach(el=> el.hidden=false);
+    root.querySelectorAll('tr[style*="visibility"]').forEach(el=> el.style.removeProperty('visibility'));
+  }
+
+  function daysBetween(a,b){ a=new Date(a); b=new Date(b); if(isNaN(a)||isNaN(b)) return ''; return Math.floor((b-a)/86400000); }
+
+  /* --- Rendera tabellen robust --- */
+  function render(){
+    ensureRegister(); unhide();
+    const ok = storageOK();
+    const tb = $('#registerTable tbody'); if(!tb){ setBadge(0, ok); return; }
+
+    const list = load();
+    setBadge(list.length, ok);
+
+    // Rensa ev. sökfilter som döljer allt
+    const qs = $('#quickSearch'); if (qs &&
 
 </body>
 </html>
