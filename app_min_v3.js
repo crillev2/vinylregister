@@ -107,6 +107,14 @@
     const btnSaveTop=$('#btnSaveTop');
     if (btnSave) btnSave.addEventListener('click', hookSave);
     if (btnSaveTop) btnSaveTop.addEventListener('click', hookSave);
+// Extra Spara-knapp nere i registret som återanvänder samma logik
+const btnSaveTop = document.querySelector('#btnSaveTop');
+if (btnSaveTop) {
+  btnSaveTop.addEventListener('click', () => {
+    const btnSave = document.querySelector('#btnSave');
+    if (btnSave) btnSave.click(); // Trigga befintlig Spara
+  });
+}
 
     const btnClear=$('#btnClear'); if(btnClear) btnClear.addEventListener('click', clearForm);
     const btnAddTest=$('#btnAddTest'); if(btnAddTest) btnAddTest.addEventListener('click', ()=>{
