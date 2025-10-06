@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Single File med fallback</title>
+  <title>Vinylregister – Single File + Skanner</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; }
     *{ box-sizing:border-box; }
@@ -30,11 +30,17 @@
     .badge{ position:fixed; right:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
     .badge-left{ position:fixed; left:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
     .note{ font-size:12px; color:var(--muted); }
-    @media (max-width: 900px){ .grid{ grid-template-columns:1fr; } }
+    /* Scanner overlay */
+    .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:center; justify-content:center; z-index:9999; }
+    .scan-card{ background:#fff; border-radius:12px; padding:12px; width:min(720px, 94vw); }
+    .scan-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+    .scan-video{ width:100%; border-radius:8px; background:#000; aspect-ratio:16/9; }
+    .scan-row{ display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+    .hint{ font-size:12px; color:#666; }
   </style>
 </head>
 <body>
-  <h1>Vinylregister (single-file med storage-fallback)</h1>
+  <h1>Vinylregister (single-file + skanner)</h1>
 
   <div class="wrap">
     <h2>Inmatning</h2>
@@ -43,7 +49,7 @@
       <label class="field"><span>Album</span><input id="album" class="manual" type="text"></label>
       <label class="field"><span>År</span><input id="year" class="manual" type="number" step="1"></label>
       <label class="field"><span>Format</span><input id="format" class="manual" type="text"></label>
-      <label class="field"><span>EAN</span><input id="ean" class="manual" type="text"></label>
+      <label class="field"><span>EAN</span><div class="row"><input id="ean" class="manual" type="text" style="flex:1;"><button class="btn" id="btnScan">Skanna streckkod</button></div></label>
       <label class="field"><span>Inköpsdatum</span><input id="purchaseDate" class="manual" type="date"></label>
       <label class="field"><span>Inköpspris</span><input id="purchasePrice" class="manual" type="number" step="1"></label>
       <label class="field"><span>Begärt pris</span><input id="askPrice" class="manual" type="number" step="1"></label>
@@ -92,6 +98,26 @@
   <div id="badge" class="badge">Init…</div>
   <div id="badge2" class="badge-left">JS?</div>
 
+  <!-- Scanner overlay -->
+  <div id="scanOverlay" class="overlay">
+    <div class="scan-card">
+      <div class="scan-head">
+        <strong>Skanna streckkod</strong>
+        <div class="row">
+          <select class="btn" id="cameraSelect"></select>
+          <button class="btn danger" id="btnStopScan">Stäng</button>
+        </div>
+      </div>
+      <video id="video" class="scan-video" autoplay muted playsinline></video>
+      <div class="scan-row">
+        <span class="hint">Tip: Håll koden i fokus och bra ljus. Skannern stannar automatiskt vid träff.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ZXing för streckkod -->
+  <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
+
   <script>
   (function(){
     "use strict";
@@ -101,30 +127,22 @@
     let editingId=null;
 
     const store = (function(){
-      // try localStorage
-      try{
-        localStorage.setItem('__vr_test__','1'); localStorage.removeItem('__vr_test__');
-        return {
-          label:'localStorage',
+      try{ localStorage.setItem('__vr_test__','1'); localStorage.removeItem('__vr_test__');
+        return { label:'localStorage',
           load(){ try{ const a=JSON.parse(localStorage.getItem(KEY)||'[]'); return Array.isArray(a)?a:[]; }catch(_){ return []; } },
           save(a){ localStorage.setItem(KEY, JSON.stringify(a)); },
           clear(){ localStorage.removeItem(KEY); }
         };
       }catch(_){}
-      // try sessionStorage
-      try{
-        sessionStorage.setItem('__vr_test__','1'); sessionStorage.removeItem('__vr_test__');
-        return {
-          label:'sessionStorage',
+      try{ sessionStorage.setItem('__vr_test__','1'); sessionStorage.removeItem('__vr_test__');
+        return { label:'sessionStorage',
           load(){ try{ const a=JSON.parse(sessionStorage.getItem(KEY)||'[]'); return Array.isArray(a)?a:[]; }catch(_){ return []; } },
           save(a){ sessionStorage.setItem(KEY, JSON.stringify(a)); },
           clear(){ sessionStorage.removeItem(KEY); }
         };
       }catch(_){}
-      // in-memory fallback
       let mem = [];
-      return {
-        label:'memory',
+      return { label:'memory',
         load(){ return mem.slice(); },
         save(a){ mem = Array.isArray(a)?a.slice():[]; },
         clear(){ mem = []; }
@@ -150,8 +168,6 @@
 
     function render(){
       const list=store.load();
-
-      // ge ID till poster som saknar det och spara tillbaka
       let changed=false;
       for (let i=0;i<list.length;i++){
         if (!list[i].id){
@@ -224,6 +240,86 @@
       store.save(list); render(); clearForm();
     }
 
+    // --- Scanner ---
+    let codeReader = null;
+    let currentDeviceId = null;
+    async function startScanner(){
+      const overlay = $('#scanOverlay');
+      overlay.style.display = 'flex';
+      setBadge2('Startar kamera…');
+
+      if (!codeReader){
+        codeReader = new ZXing.BrowserMultiFormatReader();
+      }
+
+      // Lista kameror
+      const select = $('#cameraSelect');
+      select.innerHTML='';
+      try{
+        const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+        devices.forEach((d,i)=>{
+          const opt=document.createElement('option');
+          opt.value=d.deviceId; opt.textContent=d.label || `Kamera ${i+1}`;
+          select.appendChild(opt);
+        });
+        if (devices.length){ currentDeviceId = devices[0].deviceId; select.value = currentDeviceId; }
+      }catch(e){ console.warn(e); }
+
+      // Lyssna på kamerabyte
+      select.onchange = ()=>{
+        currentDeviceId = select.value || null;
+        restartDecode();
+      };
+
+      function onResult(result){
+        if (!result || !result.text) return;
+        const ean = String(result.text).replace(/[^0-9X]/g,'');
+        const eanInput = $('#ean');
+        if (eanInput){ eanInput.value = ean; }
+        beep();
+        stopScanner();
+      }
+
+      function onError(err){ /* ignorera kontinuerliga no-code-ramar */ }
+
+      function restartDecode(){
+        try{
+          codeReader.reset();
+        }catch(_){}
+        try{
+          codeReader.decodeFromVideoDevice(currentDeviceId, 'video', (result, err) => {
+            if (result) onResult(result);
+            else if (err && !(err instanceof ZXing.NotFoundException)) onError(err);
+          });
+        }catch(e){
+          console.error(e);
+          setBadge2('Kunde inte starta kamera');
+        }
+      }
+
+      restartDecode();
+    }
+
+    function stopScanner(){
+      const overlay = $('#scanOverlay');
+      overlay.style.display = 'none';
+      try{ codeReader && codeReader.reset(); }catch(_){}
+      setBadge2('JS laddat ✅');
+    }
+
+    function beep(){
+      try{
+        const ctx = new (window.AudioContext||window.webkitAudioContext)();
+        const o = ctx.createOscillator(); const g = ctx.createGain();
+        o.type='sine'; o.frequency.value=880;
+        o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.0001, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime+0.01);
+        o.start();
+        setTimeout(()=>{ g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.05); o.stop(ctx.currentTime+0.07); }, 80);
+      }catch(_){}
+    }
+
     document.addEventListener('DOMContentLoaded', ()=>{
       // Bekräfta att JS körs
       setBadge2('JS laddat ✅');
@@ -271,6 +367,11 @@
           tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
         });
       });
+
+      // Scanner-knappar
+      const btnScan=$('#btnScan'); if(btnScan) btnScan.addEventListener('click', startScanner);
+      const btnStopScan=$('#btnStopScan'); if(btnStopScan) btnStopScan.addEventListener('click', stopScanner);
+
       document.addEventListener('click', (e)=>{
         const btn=e.target.closest('button[data-act]'); if(!btn) return;
         const id=btn.getAttribute('data-id'); const act=btn.getAttribute('data-act');
