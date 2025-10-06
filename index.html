@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – v8 (Frontkamera, helbild)</title>
+  <title>Vinylregister – v8.1 (Frontkamera, helbild, failsafe)</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; }
     *{ box-sizing:border-box; }
@@ -31,6 +31,7 @@
     #quickSearch{ width:100%; margin:8px 0 12px; }
     .badge{ position:fixed; right:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
     .badge-left{ position:fixed; left:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
+    .toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:56px; background:#222; color:#fff; font-size:12px; padding:8px 12px; border-radius:8px; z-index:99999; opacity:.95; }
     .note{ font-size:12px; color:var(--muted); }
     /* Scanner overlay */
     .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:center; justify-content:center; z-index:9999; }
@@ -42,12 +43,13 @@
   </style>
 </head>
 <body>
-  <h1>Vinylregister – v8 (Frontkamera, helbild)</h1>
+  <h1>Vinylregister – v8.1 (Frontkamera, helbild)</h1>
 
   <div class="wrap">
     <div class="wrap-head">
       <h2>Inmatning</h2>
-      <button class="btn primary" id="btnScanTop">📷 Skanna (frontkamera)</button>
+      <!-- failsafe onclick som ropar på global funktion -->
+      <button class="btn primary" id="btnScanTop" onclick="window.__startScanner && window.__startScanner()">📷 Skanna (frontkamera)</button>
     </div>
     <div class="grid">
       <label class="field"><span>Artist</span><input id="artist" class="manual" type="text"></label>
@@ -129,9 +131,19 @@
   <script>
   (function(){
     "use strict";
-    const KEY='vinyl_records';
+    // --- hjälp / felsök ---
     const $=(s,r=document)=>r.querySelector(s);
-    const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+    function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 2000); }
+    function setBadge(msg){ const b=$('#badge'); if(b) b.textContent=msg; }
+    function setBadge2(msg){ const b=$('#badge2'); if(b) b.textContent=msg; }
+
+    window.onerror = function(msg, src, line, col, err){
+      setBadge2('JS-fel: ' + msg + ' @' + (line||'?'));
+      toast('JS-fel: ' + msg);
+    };
+
+    // --- register / listning (oförändrat, men förenklat) ---
+    const KEY='vinyl_records';
     const n=v=>Number(v||0)||0;
     let editingId=null;
 
@@ -143,31 +155,11 @@
           clear(){ localStorage.removeItem(KEY); }
         };
       }catch(_){}
-      try{ sessionStorage.setItem('__vr_test__','1'); sessionStorage.removeItem('__vr_test__');
-        return { label:'sessionStorage',
-          load(){ try{ const a=JSON.parse(sessionStorage.getItem(KEY)||'[]'); return Array.isArray(a)?a:[]; }catch(_){ return []; } },
-          save(a){ sessionStorage.setItem(KEY, JSON.stringify(a)); },
-          clear(){ sessionStorage.removeItem(KEY); }
-        };
-      }catch(_){}
-      let mem = [];
-      return { label:'memory',
-        load(){ return mem.slice(); },
-        save(a){ mem = Array.isArray(a)?a.slice():[]; },
-        clear(){ mem = []; }
-      };
+      let mem=[];
+      return { label:'memory', load(){ return mem.slice(); }, save(a){ mem=Array.isArray(a)?a.slice():[]; }, clear(){ mem=[]; } };
     })();
 
-    function setBadge(msg){ const b=$('#badge'); if(b) b.textContent=msg; }
-    function setBadge2(msg){ const b=$('#badge2'); if(b) b.textContent=msg; }
-    function setCamInfo(msg){ const el=$('#camInfo'); if (el) el.textContent = msg || ''; }
-
     function daysBetween(a,b){ a=new Date(a); b=new Date(b); if(isNaN(a)||isNaN(b)) return ''; return Math.floor((b-a)/86400000); }
-    function listKeysInfo(){
-      const out=[]; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); const v=localStorage.getItem(k)||''; out.push('L:'+k+'('+v.length+')'); } }catch(_){}
-      try{ for(let i=0;i<sessionStorage.length;i++){ const k=sessionStorage.key(i); const v=sessionStorage.getItem(k)||''; out.push('S:'+k+'('+v.length+')'); } }catch(_){}
-      return out.join(' · ');
-    }
     function hideEANColumn(tbl){
       if(!tbl || !tbl.tHead || !tbl.tHead.rows.length) return;
       const idx = Array.from(tbl.tHead.rows[0].cells).findIndex(th => th.getAttribute('data-col')==='ean' || (th.textContent||'').trim().toLowerCase()==='ean');
@@ -175,21 +167,9 @@
       tbl.tHead.rows[0].cells[idx].classList.add('col-ean');
       Array.from(tbl.tBodies).forEach(tbody=> Array.from(tbody.rows).forEach(tr=> tr.cells[idx] && tr.cells[idx].classList.add('col-ean')));
     }
-
     function render(){
       const list=store.load();
-      let changed=false;
-      for (let i=0;i<list.length;i++){
-        if (!list[i].id){
-          list[i].id = (crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random());
-          changed=true;
-        }
-      }
-      if (changed) store.save(list);
-
       setBadge(`Single-file • ${list.length} poster • Storage: ${store.label}`);
-      const ki=$('#keysInfo'); if(ki) ki.textContent = 'Nycklar: ' + (listKeysInfo() || '—');
-
       const tb=$('#registerTable tbody'); if(!tb) return;
       tb.innerHTML='';
       const today = new Date();
@@ -241,7 +221,6 @@
       const eh=$('#editHint'); if(eh) eh.style.display='none';
       editingId=null;
     }
-
     function hookSave(){
       const rec = buildFromForm();
       const list = store.load();
@@ -250,7 +229,7 @@
       store.save(list); render(); clearForm();
     }
 
-    // --- Skanner v8: FRONT ONLY + HELBILD ---
+    // --- Skanner v8.1: FRONT ONLY + HELBILD ---
     let codeReader = null;
     let currentDeviceId = null;
     let lastStream = null;
@@ -258,24 +237,19 @@
     let deviceIndex = 0;
     let watchdogTimer = null;
 
-    const HINTS = (function(){
-      try{
-        const hints = new Map();
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-          ZXing.BarcodeFormat.EAN_13,
-          ZXing.BarcodeFormat.EAN_8,
-          ZXing.BarcodeFormat.UPC_A,
-          ZXing.BarcodeFormat.UPC_E
-        ]);
-        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-        return hints;
-      }catch(_){ return undefined; }
-    })();
-
     function makeReader(){
       if (!codeReader){
-        try{ codeReader = new ZXing.BrowserMultiFormatReader(HINTS); }
-        catch(_){ codeReader = new ZXing.BrowserMultiFormatReader(); }
+        try{
+          const hints = new Map();
+          hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+            ZXing.BarcodeFormat.EAN_13,
+            ZXing.BarcodeFormat.EAN_8,
+            ZXing.BarcodeFormat.UPC_A,
+            ZXing.BarcodeFormat.UPC_E
+          ]);
+          hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+          codeReader = new ZXing.BrowserMultiFormatReader(hints);
+        }catch(_){ codeReader = new ZXing.BrowserMultiFormatReader(); }
       }
       return codeReader;
     }
@@ -291,7 +265,6 @@
     async function buildFrontList(){
       const devices = await navigator.mediaDevices.enumerateDevices();
       const vids = devices.filter(d=> d.kind==='videoinput');
-      // endast front/selfie
       const fronts = vids.filter(d=> /(front|user|selfie|face)/i.test(d.label||''));
       deviceList = fronts.length ? fronts : vids; // fallback om label saknas
       deviceIndex = 0;
@@ -322,20 +295,26 @@
     }
 
     async function startScanner(){
-      const overlay = $('#scanOverlay');
-      overlay.style.display = 'flex';
-      setBadge2('Startar (front)…');
-
-      // 1) Säkerställ labels genom en snabb getUserMedia på front
       try{
-        const pre = await navigator.mediaDevices.getUserMedia({ video: { facingMode:{ ideal:'user' }, width:{ideal:1280}, height:{ideal:720} } });
-        const v=$('#video'); v.srcObject=pre; lastStream=pre;
-      }catch(_){ /* ignore */}
+        toast('Startar skanner…');
+        const overlay = $('#scanOverlay');
+        overlay.style.display = 'flex';
 
-      // 2) Bygg lista med frontkameror och starta ZXing
-      try{ await buildFrontList(); }catch(_){}
-      await startZXing();
+        // preflight: få labels + front
+        try{
+          const pre = await navigator.mediaDevices.getUserMedia({ video: { facingMode:{ exact:'user' }, width:{ideal:1280}, height:{ideal:720} } });
+          const v=$('#video'); v.srcObject=pre; lastStream=pre;
+        }catch(_){ /* ignore */}
+
+        await buildFrontList();
+        await startZXing();
+      }catch(e){
+        toast('Kunde inte starta skanner: ' + (e && e.message ? e.message : e));
+        setBadge2('Startfel');
+      }
     }
+    // expose som failsafe för onclick
+    window.__startScanner = startScanner;
 
     async function stopScanner(){
       const overlay = $('#scanOverlay');
@@ -377,22 +356,22 @@
             if (result && result.text){
               onDetectedEAN(result.text);
             } else if (err && !(err instanceof ZXing.NotFoundException)){
-              console.warn('ZXing error:', err);
+              setBadge2('ZXing-fel (ej NotFound)');
             }
           });
           setTimeout(()=>{
             const video = $('#video');
             lastStream = video && video.srcObject ? video.srcObject : null;
+            // spegla för selfie
+            video.classList.add('mirror');
             const t = lastStream && lastStream.getVideoTracks ? lastStream.getVideoTracks()[0] : null;
             const st = t && t.getSettings ? t.getSettings() : {};
-            setCamInfo((t?.label||'Frontkamera')+' '+(st.width||'')+'x'+(st.height||''));
-            // se till att videon är speglad (selfie)
-            video.classList.add('mirror');
+            $('#camInfo').textContent = (t?.label||'Frontkamera')+' '+(st.width||'')+'x'+(st.height||'');
             if (t){ t.onended = ()=>{ setBadge2('Ström slutade – startar om'); restartZXing(); }; }
           }, 400);
         }catch(e){
-          console.error(e);
           setBadge2('Kunde inte starta frontkamera');
+          toast('Kunde inte starta frontkamera');
         }
       }
 
@@ -419,7 +398,6 @@
 
       await restartZXing();
 
-      // enkel watchdog
       clearInterval(watchdogTimer);
       watchdogTimer = setInterval(()=>{
         if (!trackAlive()){
@@ -443,48 +421,50 @@
     }
 
     document.addEventListener('DOMContentLoaded', ()=>{
-      setBadge2('JS laddat ✅');
-
-      const btnSave=$('#btnSave');
-      const btnSaveTop=$('#btnSaveTop');
-      if (btnSave) btnSave.addEventListener('click', hookSave);
-      if (btnSaveTop) btnSaveTop.addEventListener('click', hookSave);
-
-      const btnClear=$('#btnClear'); if(btnClear) btnClear.addEventListener('click', clearForm);
-      const btnAddTest=$('#btnAddTest'); if(btnAddTest) btnAddTest.addEventListener('click', ()=>{
-        const list=store.load();
-        list.push({
-          id:(crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random()),
-          artist:'Testartist', title:'Testalbum', year:'1979', format:'LP',
-          ean:String(Math.floor(1000000000000 + Math.random()*8999999999999)),
-          purchaseDate:new Date().toISOString().slice(0,10),
-          purchasePrice:50, askPrice:100, paidPrice:0, stockQty:1, thumbUrl:''
+      try{
+        // bindningar
+        const btnSave=$('#btnSave'); btnSave && btnSave.addEventListener('click', hookSave);
+        const btnSaveTop=$('#btnSaveTop'); btnSaveTop && btnSaveTop.addEventListener('click', hookSave);
+        const btnClear=$('#btnClear'); btnClear && btnClear.addEventListener('click', clearForm);
+        const btnAddTest=$('#btnAddTest'); btnAddTest && btnAddTest.addEventListener('click', ()=>{
+          const list=store.load();
+          list.push({
+            id:(crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random()),
+            artist:'Testartist', title:'Testalbum', year:'1979', format:'LP',
+            ean:String(Math.floor(1000000000000 + Math.random()*8999999999999)),
+            purchaseDate:new Date().toISOString().slice(0,10),
+            purchasePrice:50, askPrice:100, paidPrice:0, stockQty:1, thumbUrl:''
+          });
+          store.save(list); render();
         });
-        store.save(list); render();
-      });
-      const btnExport=$('#btnExport'); if(btnExport) btnExport.addEventListener('click', ()=>{
-        const blob=new Blob([JSON.stringify(store.load()||[], null, 2)], {type:'application/json'});
-        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='vinyl_records.json'; a.click();
-      });
-      const btnImport=$('#btnImport'); if(btnImport) btnImport.addEventListener('click', ()=>{
-        const input=document.createElement('input'); input.type='file'; input.accept='application/json';
-        input.onchange = async (e)=>{
-          const file=e.target.files[0]; if(!file) return;
-          const text=await file.text();
-          try{ const arr=JSON.parse(text); if(!Array.isArray(arr)) throw new Error('Inte en array'); store.save(arr); render(); }
-          catch(err){ alert('Ogiltig JSON: '+err.message); }
-        };
-        input.click();
-      });
-      const btnReset=$('#btnReset'); if(btnReset) btnReset.addEventListener('click', ()=>{
-        if (!confirm('Nollställa registret i ' + store.label + '?')) return;
-        store.clear(); render();
-      });
+        const btnExport=$('#btnExport'); btnExport && btnExport.addEventListener('click', ()=>{
+          const blob=new Blob([JSON.stringify(store.load()||[], null, 2)], {type:'application/json'});
+          const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='vinyl_records.json'; a.click();
+        });
+        const btnImport=$('#btnImport'); btnImport && btnImport.addEventListener('click', ()=>{
+          const input=document.createElement('input'); input.type='file'; input.accept='application/json';
+          input.onchange = async (e)=>{
+            const file=e.target.files[0]; if(!file) return;
+            const text=await file.text();
+            try{ const arr=JSON.parse(text); if(!Array.isArray(arr)) throw new Error('Inte en array'); store.save(arr); render(); }
+            catch(err){ alert('Ogiltig JSON: '+err.message); }
+          };
+          input.click();
+        });
+        const btnReset=$('#btnReset'); btnReset && btnReset.addEventListener('click', ()=>{
+          if (!confirm('Nollställa registret i ' + store.label + '?')) return;
+          store.clear(); render();
+        });
 
-      const btnScanTop=$('#btnScanTop'); if(btnScanTop) btnScanTop.addEventListener('click', startScanner);
-      const btnStopScan=$('#btnStopScan'); if(btnStopScan) btnStopScan.addEventListener('click', stopScanner);
+        // extra bindning (utöver inline onclick) – bra om inline blockerats
+        const btnScanTop=$('#btnScanTop'); btnScanTop && btnScanTop.addEventListener('click', ()=>{ toast('Knapp klickad'); startScanner(); });
+        const btnStopScan=$('#btnStopScan'); btnStopScan && btnStopScan.addEventListener('click', stopScanner);
 
-      render();
+        setBadge2('JS laddat ✅ (v8.1)');
+        render();
+      }catch(e){
+        window.onerror(String(e && e.message ? e.message : e));
+      }
     });
   })();
   </script>
