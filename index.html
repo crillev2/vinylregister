@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – v8.5 (Normalkamera / environment, helbild)</title>
+  <title>Vinylregister – v8.6 (Normalkamera/environ., helbild)</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; }
     *{ box-sizing:border-box; }
@@ -35,22 +35,26 @@
     .note{ font-size:12px; color:var(--muted); }
     /* Scanner overlay */
     .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:center; justify-content:center; z-index:9999; }
-    .scan-card{ background:#fff; border-radius:12px; padding:12px; width:min(820px, 96vw); }
+    .scan-card{ background:#fff; border-radius:12px; padding:12px; width:min(860px, 96vw); }
     .scan-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
     .scan-video-wrap{ position:relative; }
     .scan-video{ width:100%; border-radius:8px; background:#000; aspect-ratio:16/9; }
     .range{ display:flex; align-items:center; gap:8px; }
     .range input[type="range"]{ width:180px; }
     .status{ font-size:12px; color:#333; padding:4px 8px; background:#f5f5f5; border:1px solid #eee; border-radius:6px; }
+    .tip{ font-size:12px; color:#333; }
   </style>
 </head>
 <body>
-  <h1>Vinylregister – v8.5 (Normalkamera / environment, helbild)</h1>
+  <h1>Vinylregister – v8.6 (Normalkamera/environ., helbild)</h1>
 
   <div class="wrap">
     <div class="wrap-head">
       <h2>Inmatning</h2>
-      <button class="btn primary" id="btnScanTop" onclick="window.__startScanner && window.__startScanner()">📷 Skanna (normalkamera)</button>
+      <div class="row">
+        <button class="btn" id="btnLandscape">🔒 Helbild & landskap</button>
+        <button class="btn primary" id="btnScanTop" onclick="window.__startScanner && window.__startScanner()">📷 Skanna (normalkamera)</button>
+      </div>
     </div>
     <div class="grid">
       <label class="field"><span>Artist</span><input id="artist" class="manual" type="text"></label>
@@ -126,6 +130,7 @@
         <span id="camInfo" class="note"></span>
         <span id="scanStatus" class="status"></span>
       </div>
+      <p class="tip">Tips: håll telefonen i <b>landskapsläge</b> (brett). Kodens linjer horisontellt.</p>
     </div>
   </div>
 
@@ -135,9 +140,8 @@
   <script>
   (function(){
     "use strict";
-    // helpers
     const $=(s,r=document)=>r.querySelector(s);
-    function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 1600); }
+    function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 1800); }
     function setBadge(msg){ const b=$('#badge'); if(b) b.textContent=msg; }
     function setBadge2(msg){ const b=$('#badge2'); if(b) b.textContent=msg; }
     window.onerror = (m)=>{ setBadge2('JS-fel: '+m); toast('JS-fel: '+m); };
@@ -193,21 +197,20 @@
     function clearForm(){ ['artist','album','year','format','ean','purchaseDate','purchasePrice','askPrice','paidPrice','stockQty'].forEach(id=>{ const el=$('#'+id); if(el) el.value=(id==='stockQty')?1:''; }); editingId=null; }
     function hookSave(){ const rec=buildFromForm(); const list=store.load(); const idx=list.findIndex(r=>r.id===rec.id); if(idx>=0) list[idx]=rec; else list.push(rec); store.save(list); render(); clearForm(); }
 
-    // --- Skanner v8.5: Normalkamera (environment) ONLY ---
+    // --- Skanner v8.6: environment ONLY, 1280x720, robust ---
     let codeReader=null, lastStream=null, watchdogTimer=null, decodeCount=0, notFoundCount=0;
     let envDevice=null, torchOn=false;
 
-    function makeReader(){
-      if (!codeReader){
-        try{
-          const hints=new Map();
-          hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E]);
-          hints.set(ZXing.DecodeHintType.TRY_HARDER,true);
-          codeReader=new ZXing.BrowserMultiFormatReader(hints);
-        }catch(_){ codeReader=new ZXing.BrowserMultiFormatReader(); }
-      }
-      return codeReader;
+    function hintsReader(){
+      try{
+        const hints=new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER,true);
+        return new ZXing.BrowserMultiFormatReader(hints);
+      }catch(_){ return new ZXing.BrowserMultiFormatReader(); }
     }
+    function makeReader(){ if (!codeReader) codeReader=hintsReader(); return codeReader; }
+
     function trackAlive(){
       if (!lastStream) return false;
       const vTracks=lastStream.getVideoTracks?lastStream.getVideoTracks():[];
@@ -218,16 +221,23 @@
     function labelScore(label){
       label=(label||'').toLowerCase();
       let s=0;
-      if (/(back|rear|environment|main)/.test(label)) s+=10;
-      if (/(wide|tele|main)/.test(label)) s+=2;
-      if (/(front|user|selfie|face)/.test(label)) s-=50;
+      if (/(back|rear|environment|main)/.test(label)) s+=100;
+      if (/(wide|tele|main|1\.0x)/.test(label)) s+=5;
+      if (/(front|user|selfie|face)/.test(label)) s-=500;
       return s;
     }
     async function pickEnvironmentCamera(){
       const devices=await navigator.mediaDevices.enumerateDevices();
       const vids=devices.filter(d=>d.kind==='videoinput');
       vids.sort((a,b)=> labelScore(b.label)-labelScore(a.label));
-      envDevice = vids.find(d=>/(back|rear|environment|main|tele|wide)/i.test(d.label||'')) || vids[0] || null;
+      envDevice = vids.find(d=>/(back|rear|environment|main|tele|wide)/i.test(d.label||'')) || vids[vids.length-1] || vids[0] || null;
+    }
+    function facingOf(stream){
+      try{
+        const t=stream.getVideoTracks()[0];
+        const s=t.getSettings? t.getSettings():{};
+        return s.facingMode||'';
+      }catch(_){ return ''; }
     }
 
     function scanStatus(){ const s=$('#scanStatus'); if(s) s.textContent=`r:${decodeCount} • nf:${notFoundCount}`; }
@@ -284,17 +294,39 @@
       }
     }
 
+    async function ensureEnvironmentOrCycle(maxTries=4){
+      // Om fel kamera öppnats, cykla genom kända enheter tills facingMode=='environment'
+      for (let i=0; i<maxTries; i++){
+        const f = facingOf(lastStream);
+        const label = (lastStream && lastStream.getVideoTracks()[0] && lastStream.getVideoTracks()[0].label) || '';
+        if (String(f).toLowerCase().includes('environment') || /back|rear|environment|main/i.test(label)){
+          return true;
+        }
+        // annars: välj om envDevice & starta om
+        await pickEnvironmentCamera();
+        await restartZXing(true);
+      }
+      return false;
+    }
+
     async function startScanner(){
       try{
         $('#scanOverlay').style.display='flex';
         decodeCount=0; notFoundCount=0; scanStatus();
-        // preflight för environment (så att labels finns)
+        // 1) Preflight för permissions + prefer environment
         try{
-          const pre = await navigator.mediaDevices.getUserMedia({ video: { facingMode:{ exact:'environment' }, width:{ideal:1920}, height:{ideal:1080} } });
+          const pre = await navigator.mediaDevices.getUserMedia({ video: {
+            facingMode:{ ideal:'environment' },
+            width:{ ideal:1280 }, height:{ ideal:720 }, aspectRatio:{ ideal:16/9 }
+          }});
           const v=$('#video'); v.srcObject=pre; lastStream=pre;
-        }catch(_){}
+        }catch(_){ /* ignore */}
+        // 2) Välj bästa environment-enhet (efter att labels finns)
         await pickEnvironmentCamera();
+        // 3) Starta ZXing
         await startZXing();
+        // 4) Säkerställ environment – om inte, cykla enheter
+        await ensureEnvironmentOrCycle(6);
       }catch(e){ toast('Startfel: '+(e?.message||e)); setBadge2('Startfel'); }
     }
     window.__startScanner = startScanner;
@@ -304,7 +336,7 @@
       try{ codeReader && codeReader.reset(); }catch(_){}
       if (lastStream){ try{ lastStream.getTracks().forEach(t=>t.stop()); }catch(_){ } lastStream=null; }
       clearInterval(watchdogTimer); watchdogTimer=null;
-      setBadge2('JS laddat ✅ (v8.5)');
+      setBadge2('JS laddat ✅ (v8.6)');
     }
 
     function onDetectedEAN(text){
@@ -317,14 +349,18 @@
 
     async function startZXing(){
       const reader=makeReader();
-      async function restartZXing(){
+      window.__restartZXing = restartZXing;
+      return restartZXing(false);
+      async function restartZXing(isCycle){
         try{ reader.reset(); }catch(_){}
         notFoundCount=0; scanStatus();
         const constraints = {
           video: {
             deviceId: envDevice && envDevice.deviceId ? { exact: envDevice.deviceId } : undefined,
             facingMode: envDevice ? undefined : { exact: 'environment' },
-            width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:30 }, advanced:[{ focusMode:'continuous' }]
+            width:{ ideal:1280 }, height:{ ideal:720 }, frameRate:{ ideal:30 },
+            aspectRatio:{ ideal: 16/9 },
+            advanced:[{ focusMode:'continuous' }]
           }
         };
         try{
@@ -340,17 +376,12 @@
             const st = t && t.getSettings ? t.getSettings() : {};
             $('#camInfo').textContent = (t?.label||'Normalkamera (environment)')+' '+(st.width||'')+'x'+(st.height||'');
             setupZoom(); updateTorchButton();
-            if (t){ t.onended = ()=>{ setBadge2('Ström slutade – startar om'); restartZXing(); }; }
-          }, 400);
+            if (t){ t.onended = ()=>{ setBadge2('Ström slutade – startar om'); restartZXing(false); }; }
+          }, 350);
         }catch(e){
           setBadge2('Kunde inte starta normalkamera'); toast('Kunde inte starta normalkamera');
         }
       }
-      await restartZXing();
-      clearInterval(watchdogTimer);
-      watchdogTimer=setInterval(()=>{ if (!trackAlive()){ setBadge2('Watchdog: startar om'); restartZXing(); } }, 3000);
-      // säkerhetsåterstart om 0 träffar efter 20 sekunder
-      setTimeout(()=>{ if (decodeCount===0){ setBadge2('Auto-omstart (inga träffar)'); restartZXing(); } }, 20000);
     }
 
     function beep(){
@@ -361,6 +392,15 @@
         g.gain.setValueAtTime(0.0001, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime+0.01);
         o.start(); setTimeout(()=>{ g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.06); o.stop(ctx.currentTime+0.1); }, 100);
       }catch(_){}
+    }
+
+    async function lockLandscape(){
+      try{
+        const el=document.documentElement;
+        if (document.fullscreenElement) await document.exitFullscreen();
+        await el.requestFullscreen({ navigationUI:'hide' });
+        if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
+      }catch(_){ /* best-effort */ }
     }
 
     document.addEventListener('DOMContentLoaded', ()=>{
@@ -384,8 +424,9 @@
       const btnReset=$('#btnReset'); btnReset && btnReset.addEventListener('click', ()=>{ if (!confirm('Nollställa registret i '+store.label+'?')) return; store.clear(); render(); });
 
       const btnStopScan=$('#btnStopScan'); btnStopScan && btnStopScan.addEventListener('click', stopScanner);
+      const btnLandscape=$('#btnLandscape'); btnLandscape && btnLandscape.addEventListener('click', lockLandscape);
 
-      setBadge2('JS laddat ✅ (v8.5)');
+      setBadge2('JS laddat ✅ (v8.6) • mål 1280×720');
       render();
     });
   })();
