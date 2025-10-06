@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Single File OK</title>
+  <title>Vinylregister – Single File med fallback</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; }
     *{ box-sizing:border-box; }
@@ -27,13 +27,14 @@
     td.right, th.right{ text-align:right; }
     .col-ean{ display:none !important; } /* dölj EAN-kolumnen */
     #quickSearch{ width:100%; margin:8px 0 12px; }
-    .badge{ position:fixed; right:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; }
-    .note{ font-size:12px; color:#666; }
+    .badge{ position:fixed; right:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
+    .badge-left{ position:fixed; left:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
+    .note{ font-size:12px; color:var(--muted); }
     @media (max-width: 900px){ .grid{ grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
-  <h1>Vinylregister (single-file OK)</h1>
+  <h1>Vinylregister (single-file med storage-fallback)</h1>
 
   <div class="wrap">
     <h2>Inmatning</h2>
@@ -89,6 +90,7 @@
   </div>
 
   <div id="badge" class="badge">Init…</div>
+  <div id="badge2" class="badge-left">JS?</div>
 
   <script>
   (function(){
@@ -98,13 +100,44 @@
     const n=v=>Number(v||0)||0;
     let editingId=null;
 
+    const store = (function(){
+      // try localStorage
+      try{
+        localStorage.setItem('__vr_test__','1'); localStorage.removeItem('__vr_test__');
+        return {
+          label:'localStorage',
+          load(){ try{ const a=JSON.parse(localStorage.getItem(KEY)||'[]'); return Array.isArray(a)?a:[]; }catch(_){ return []; } },
+          save(a){ localStorage.setItem(KEY, JSON.stringify(a)); },
+          clear(){ localStorage.removeItem(KEY); }
+        };
+      }catch(_){}
+      // try sessionStorage
+      try{
+        sessionStorage.setItem('__vr_test__','1'); sessionStorage.removeItem('__vr_test__');
+        return {
+          label:'sessionStorage',
+          load(){ try{ const a=JSON.parse(sessionStorage.getItem(KEY)||'[]'); return Array.isArray(a)?a:[]; }catch(_){ return []; } },
+          save(a){ sessionStorage.setItem(KEY, JSON.stringify(a)); },
+          clear(){ sessionStorage.removeItem(KEY); }
+        };
+      }catch(_){}
+      // in-memory fallback
+      let mem = [];
+      return {
+        label:'memory',
+        load(){ return mem.slice(); },
+        save(a){ mem = Array.isArray(a)?a.slice():[]; },
+        clear(){ mem = []; }
+      };
+    })();
+
     function setBadge(msg){ const b=$('#badge'); if(b) b.textContent=msg; }
-    function storageOK(){ try{ localStorage.setItem('__vr_sf__','1'); localStorage.removeItem('__vr_sf__'); return true; } catch(e){ return false; } }
-    function load(){ try{ const raw=localStorage.getItem(KEY); const a=raw?JSON.parse(raw):[]; return Array.isArray(a)?a:[]; }catch(_){ return []; } }
-    function save(a){ try{ localStorage.setItem(KEY, JSON.stringify(a)); } catch(_){ alert('Kan inte spara till localStorage (privat läge?)'); } }
+    function setBadge2(msg){ const b=$('#badge2'); if(b) b.textContent=msg; }
+
     function daysBetween(a,b){ a=new Date(a); b=new Date(b); if(isNaN(a)||isNaN(b)) return ''; return Math.floor((b-a)/86400000); }
     function listKeysInfo(){
-      const out=[]; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); const v=localStorage.getItem(k)||''; out.push(k+'('+v.length+')'); } }catch(_){}
+      const out=[]; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); const v=localStorage.getItem(k)||''; out.push('L:'+k+'('+v.length+')'); } }catch(_){}
+      try{ for(let i=0;i<sessionStorage.length;i++){ const k=sessionStorage.key(i); const v=sessionStorage.getItem(k)||''; out.push('S:'+k+'('+v.length+')'); } }catch(_){}
       return out.join(' · ');
     }
     function hideEANColumn(tbl){
@@ -116,8 +149,7 @@
     }
 
     function render(){
-      const ok=storageOK();
-      const list=load();
+      const list=store.load();
 
       // ge ID till poster som saknar det och spara tillbaka
       let changed=false;
@@ -127,9 +159,9 @@
           changed=true;
         }
       }
-      if (changed) save(list);
+      if (changed) store.save(list);
 
-      setBadge(`Single-file • ${list.length} poster • ${ok?'✅ lagring':'⚠️ ingen lagring'}`);
+      setBadge(`Single-file • ${list.length} poster • Storage: ${store.label}`);
       const ki=$('#keysInfo'); if(ki) ki.textContent = 'Nycklar: ' + (listKeysInfo() || '—');
 
       const tb=$('#registerTable tbody'); if(!tb) return;
@@ -185,17 +217,16 @@
     }
 
     function hookSave(){
-      if (!storageOK()){ alert('Kan inte spara (privat läge?)'); return; }
       const rec = buildFromForm();
-      const list = load();
+      const list = store.load();
       const idx = list.findIndex(r=> r.id===rec.id);
       if (idx>=0) list[idx]=rec; else list.push(rec);
-      save(list); render(); clearForm();
+      store.save(list); render(); clearForm();
     }
 
     document.addEventListener('DOMContentLoaded', ()=>{
       // Bekräfta att JS körs
-      setBadge('JS laddat ✅');
+      setBadge2('JS laddat ✅');
 
       const btnSave=$('#btnSave');
       const btnSaveTop=$('#btnSaveTop');
@@ -204,7 +235,7 @@
 
       const btnClear=$('#btnClear'); if(btnClear) btnClear.addEventListener('click', clearForm);
       const btnAddTest=$('#btnAddTest'); if(btnAddTest) btnAddTest.addEventListener('click', ()=>{
-        const list=load();
+        const list=store.load();
         list.push({
           id:(crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random()),
           artist:'Testartist', title:'Testalbum', year:'1979', format:'LP',
@@ -212,10 +243,10 @@
           purchaseDate:new Date().toISOString().slice(0,10),
           purchasePrice:50, askPrice:100, paidPrice:0, stockQty:1, thumbUrl:''
         });
-        save(list); render();
+        store.save(list); render();
       });
       const btnExport=$('#btnExport'); if(btnExport) btnExport.addEventListener('click', ()=>{
-        const blob=new Blob([localStorage.getItem(KEY)||'[]'], {type:'application/json'});
+        const blob=new Blob([JSON.stringify(store.load()||[], null, 2)], {type:'application/json'});
         const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='vinyl_records.json'; a.click();
       });
       const btnImport=$('#btnImport'); if(btnImport) btnImport.addEventListener('click', ()=>{
@@ -223,14 +254,14 @@
         input.onchange = async (e)=>{
           const file=e.target.files[0]; if(!file) return;
           const text=await file.text();
-          try{ const arr=JSON.parse(text); if(!Array.isArray(arr)) throw new Error('Inte en array'); save(arr); render(); }
+          try{ const arr=JSON.parse(text); if(!Array.isArray(arr)) throw new Error('Inte en array'); store.save(arr); render(); }
           catch(err){ alert('Ogiltig JSON: '+err.message); }
         };
         input.click();
       });
       const btnReset=$('#btnReset'); if(btnReset) btnReset.addEventListener('click', ()=>{
-        if (!confirm('Nollställa endast "vinyl_records"?')) return;
-        save([]); render();
+        if (!confirm('Nollställa registret i ' + store.label + '?')) return;
+        store.clear(); render();
       });
       const qs=$('#quickSearch'); if(qs) qs.addEventListener('input', function(){
         const q=this.value.toLowerCase();
@@ -243,13 +274,13 @@
       document.addEventListener('click', (e)=>{
         const btn=e.target.closest('button[data-act]'); if(!btn) return;
         const id=btn.getAttribute('data-id'); const act=btn.getAttribute('data-act');
-        const list=load();
+        const list=store.load();
         const idx=list.findIndex(r=> r.id===id);
         if (idx<0) return;
 
         if (act==='del'){
           if (!confirm('Ta bort denna post?')) return;
-          list.splice(idx,1); save(list); render(); return;
+          list.splice(idx,1); store.save(list); render(); return;
         }
         if (act==='edit'){
           const rec=list[idx];
