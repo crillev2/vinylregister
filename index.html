@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Single File + Skanner v2</title>
+  <title>Vinylregister – Single File + Skanner v3</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; }
     *{ box-sizing:border-box; }
@@ -43,7 +43,7 @@
   </style>
 </head>
 <body>
-  <h1>Vinylregister (single-file + skanner v2)</h1>
+  <h1>Vinylregister (single-file + skanner v3)</h1>
 
   <div class="wrap">
     <h2>Inmatning</h2>
@@ -117,7 +117,7 @@
         <div class="guides"><div class="guide-box"></div></div>
       </div>
       <div class="scan-row">
-        <span class="hint">Tips: Fyll den gröna rutan med streckkoden, bra ljus, håll still. Skannern stoppar när kod hittas.</span>
+        <span class="hint">Tips: Fyll den gröna rutan med streckkoden. Bra ljus. Skannern startar om om kameran stannar.</span>
       </div>
     </div>
   </div>
@@ -247,11 +247,13 @@
       store.save(list); render(); clearForm();
     }
 
-    // --- Scanner v2 ---
+    // --- Scanner v3 (kontinuerlig + watchdog + wake lock) ---
     let codeReader = null;
     let currentDeviceId = null;
     let lastStream = null;
     let torchOn = false;
+    let watchdogTimer = null;
+    let wakeLock = null;
 
     const HINTS = (function(){
       try{
@@ -275,10 +277,35 @@
       return codeReader;
     }
 
+    function trackAlive(){
+      if (!lastStream) return false;
+      const vTracks = lastStream.getVideoTracks ? lastStream.getVideoTracks() : [];
+      if (!vTracks.length) return false;
+      const t = vTracks[0];
+      return t.readyState === 'live' && !t.muted && !t.stopped;
+    }
+
+    async function requestWakeLock(){
+      try{
+        if ('wakeLock' in navigator){
+          wakeLock = await navigator.wakeLock.request('screen');
+          wakeLock.addEventListener('release', ()=> setBadge2('Wake lock släppt'));
+          setBadge2('Wake lock aktiv');
+        }
+      }catch(_){ /* ignore */ }
+    }
+
+    function releaseWakeLock(){
+      try{ wakeLock && wakeLock.release(); }catch(_){}
+      wakeLock = null;
+    }
+
     async function startScanner(){
       const overlay = $('#scanOverlay');
       overlay.style.display = 'flex';
       setBadge2('Startar kamera…');
+
+      await requestWakeLock();
 
       const reader = makeReader();
       const select = $('#cameraSelect');
@@ -300,44 +327,84 @@
         restartDecode();
       };
 
-      async function restartDecode(){
-        try{ reader.reset(); }catch(_){}
-        torchOn = false;
-        const constraints = {
-          video: {
-            deviceId: currentDeviceId ? { exact: currentDeviceId } : undefined,
-            facingMode: currentDeviceId ? undefined : { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            aspectRatio: { ideal: 1.777 },
-            frameRate: { ideal: 30 }
-          }
-        };
-        try{
-          await reader.decodeFromConstraints(constraints, 'video', (result, err) => {
-            if (result && result.text){
-              onResult(result.text);
-            } else if (err && !(err instanceof ZXing.NotFoundException)){
-              console.warn('Scan error:', err);
-            }
-          });
-          // vänta lite och plocka strömmen
-          await new Promise(r=>setTimeout(r, 300));
-          const video = $('#video');
-          lastStream = video && video.srcObject ? video.srcObject : null;
-          updateTorchButton();
-        }catch(e){
-          console.error(e);
-          setBadge2('Kunde inte starta kamera');
-        }
-      }
-
       function onResult(text){
         const ean = String(text).replace(/[^0-9X]/g,'');
         const eanInput = $('#ean');
         if (eanInput){ eanInput.value = ean; }
         beep();
         stopScanner();
+      }
+
+      function onError(err){
+        if (err && !(err instanceof ZXing.NotFoundException)){
+          console.warn('Scan error:', err);
+        }
+      }
+
+      function startDecode(){
+        try{
+          reader.decodeFromVideoDevice(currentDeviceId, 'video', (result, err)=>{
+            if (result && result.text) onResult(result.text);
+            else if (err) onError(err);
+          });
+          // fånga strömmen efter en stund
+          setTimeout(()=>{
+            const video = $('#video');
+            lastStream = video && video.srcObject ? video.srcObject : null;
+            hookTrackEvents();
+            updateTorchButton();
+          }, 400);
+        }catch(e){
+          console.error(e);
+          setBadge2('Kunde inte starta kamera');
+        }
+      }
+
+      function hookTrackEvents(){
+        if (!lastStream) return;
+        const t = lastStream.getVideoTracks && lastStream.getVideoTracks()[0];
+        if (!t) return;
+        t.onended = ()=>{
+          setBadge2('Kamerasström slutade – startar om…');
+          restartDecode();
+        };
+        t.onmute = ()=> setBadge2('Kamera mutad');
+        t.onunmute = ()=> setBadge2('Kamera aktiv');
+      }
+
+      function startWatchdog(){
+        stopWatchdog();
+        watchdogTimer = setInterval(()=>{
+          const ok = trackAlive();
+          if (!ok){
+            setBadge2('Watchdog: startar om…');
+            restartDecode();
+          }
+        }, 2500);
+      }
+
+      function stopWatchdog(){
+        if (watchdogTimer){ clearInterval(watchdogTimer); watchdogTimer=null; }
+      }
+
+      async function restartDecode(){
+        try{ reader.reset(); }catch(_){}
+        torchOn = false;
+        stopWatchdog();
+        startDecode();
+        startWatchdog();
+      }
+
+      $('#btnTorch').onclick = ()=> setTorch(!torchOn);
+
+      async function setTorch(on){
+        try{
+          if (!lastStream) return;
+          const track = lastStream.getVideoTracks()[0];
+          await track.applyConstraints({ advanced: [{ torch: !!on }] });
+          torchOn = !!on;
+          updateTorchButton();
+        }catch(e){ console.warn('Torch not supported:', e); }
       }
 
       function supportsTorch(){
@@ -348,16 +415,6 @@
           const caps = track.getCapabilities && track.getCapabilities();
           return !!(caps && 'torch' in caps);
         }catch(_){ return false; }
-      }
-
-      async function setTorch(on){
-        try{
-          if (!lastStream) return;
-          const track = lastStream.getVideoTracks()[0];
-          await track.applyConstraints({ advanced: [{ torch: !!on }] });
-          torchOn = !!on;
-          updateTorchButton();
-        }catch(e){ console.warn('Torch not supported:', e); }
       }
 
       function updateTorchButton(){
@@ -371,7 +428,15 @@
         }
       }
 
-      $('#btnTorch').onclick = ()=> setTorch(!torchOn);
+      document.addEventListener('visibilitychange', ()=>{
+        if (document.hidden){
+          setBadge2('Flik i bakgrunden – pausar');
+          try{ reader.reset(); }catch(_){}
+        } else {
+          setBadge2('Flik aktiv – startar om');
+          restartDecode();
+        }
+      });
 
       restartDecode();
     }
@@ -384,6 +449,7 @@
         try{ lastStream.getTracks().forEach(t=>t.stop()); }catch(_){}
         lastStream = null;
       }
+      releaseWakeLock();
       setBadge2('JS laddat ✅');
     }
 
