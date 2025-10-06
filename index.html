@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – v8.6b (Environment-only, Live + Foto)</title>
+  <title>Vinylregister – v8.7 (Native, environment-only)</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; }
     *{ box-sizing:border-box; }
@@ -22,37 +22,28 @@
     .btn.primary{ border-color:#cce2ff; background:#eef6ff; }
     .btn.danger{ border-color:#f3c2c2; background:#fff5f5; }
     .btn.danger:hover{ background:#ffecec; }
-    .table-wrap{ border:1px solid var(--line); border-radius:12px; overflow:auto; }
-    table{ width:100%; border-collapse:collapse; }
-    th,td{ padding:10px; border-bottom:1px solid #f0f0f0; text-align:left; }
-    th{ background:#fafafa; }
-    td.right, th.right{ text-align:right; }
-    .col-ean{ display:none !important; } /* dölj EAN-kolumnen */
-    #quickSearch{ width:100%; margin:8px 0 12px; }
+    .note{ font-size:12px; color:var(--muted); }
     .badge{ position:fixed; right:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
     .badge-left{ position:fixed; left:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
     .toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:56px; background:#222; color:#fff; font-size:12px; padding:8px 12px; border-radius:8px; z-index:99999; opacity:.95; }
-    .note{ font-size:12px; color:var(--muted); }
     /* Scanner overlay */
     .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:center; justify-content:center; z-index:9999; }
     .scan-card{ background:#fff; border-radius:12px; padding:12px; width:min(860px, 96vw); }
     .scan-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
     .scan-video{ width:100%; border-radius:8px; background:#000; aspect-ratio:16/9; }
-    .range{ display:flex; align-items:center; gap:8px; }
-    .range input[type="range"]{ width:180px; }
     .status{ font-size:12px; color:#333; padding:4px 8px; background:#f5f5f5; border:1px solid #eee; border-radius:6px; }
     #log{ font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:pre-wrap; background:#f7f7f7; border:1px solid #eee; border-radius:8px; padding:8px; margin-top:8px; max-height:220px; overflow:auto; }
   </style>
 </head>
 <body>
-  <h1>Vinylregister – v8.6b (Environment, Live + Foto)</h1>
+  <h1>Vinylregister – v8.7 (Native, environment-only)</h1>
 
   <div class="wrap">
     <div class="wrap-head">
       <h2>Inmatning</h2>
       <div class="row">
-        <button class="btn primary" id="btnScanLive" onclick="window.__startLive && window.__startLive()">📷 Live-skanning</button>
-        <button class="btn" id="btnScanPhoto" onclick="window.__startPhoto && window.__startPhoto()">📸 Foto (failsafe)</button>
+        <button class="btn primary" id="btnScanLive">📷 Live-skanning</button>
+        <button class="btn" id="btnScanPhoto">📸 Foto (failsafe)</button>
       </div>
     </div>
     <div class="grid">
@@ -60,31 +51,12 @@
       <label class="field"><span>Album</span><input id="album" class="manual" type="text"></label>
       <label class="field"><span>År</span><input id="year" class="manual" type="number" step="1"></label>
       <label class="field"><span>Format</span><input id="format" class="manual" type="text"></label>
-      <label class="field"><span>EAN</span><input id="ean" class="manual" type="text"></label>
+      <label class="field"><span>EAN</span><input id="ean" class="manual" type="text" inputmode="numeric" pattern="[0-9]*"></label>
       <label class="field"><span>Inköpsdatum</span><input id="purchaseDate" class="manual" type="date"></label>
       <label class="field"><span>Inköpspris</span><input id="purchasePrice" class="manual" type="number" step="1"></label>
       <label class="field"><span>Begärt pris</span><input id="askPrice" class="manual" type="number" step="1"></label>
       <label class="field"><span>Sålt (betalt pris)</span><input id="paidPrice" class="manual" type="number" step="1"></label>
       <label class="field"><span>Antal</span><input id="stockQty" class="manual" type="number" step="1" value="1"></label>
-    </div>
-  </div>
-
-  <div class="wrap" id="register">
-    <h2>Register</h2>
-    <div class="table-wrap">
-      <table id="registerTable">
-        <thead>
-          <tr>
-            <th>Artist</th>
-            <th>Album</th>
-            <th>År</th>
-            <th>Format</th>
-            <th data-col="ean" class="col-ean">EAN</th>
-            <th class="right">Åtgärd</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
     </div>
   </div>
 
@@ -96,11 +68,8 @@
   <div id="scanOverlay" class="overlay">
     <div class="scan-card">
       <div class="scan-head">
-        <strong>Live – normalkamera</strong>
+        <strong>Live – normalkamera (native)</strong>
         <div class="row">
-          <div class="range" id="zoomWrap" style="display:none;">
-            <span>Zoom</span><input type="range" id="zoomSlider" min="1" max="1" step="0.1" value="1"><span id="zoomVal">1×</span>
-          </div>
           <button class="btn" id="btnTorch" style="display:none;">💡 Lampa</button>
           <button class="btn danger" id="btnStopScan">Stäng</button>
         </div>
@@ -116,194 +85,203 @@
   <!-- Photo input (failsafe) -->
   <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none;">
 
-  <!-- ZXing -->
-  <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
   <script>
   (function(){
     "use strict";
     const $=(s,r=document)=>r.querySelector(s);
-    const logEl=$('#log');
-    function log(m){ const ts=new Date().toLocaleTimeString(); logEl.textContent = `[${ts}] ${m}\n` + logEl.textContent; }
+    const logEl=$('#log'); function log(m){ const ts=new Date().toLocaleTimeString(); logEl.textContent = `[${ts}] ${m}\n` + logEl.textContent; }
     function setBadge(msg){ const b=$('#badge'); if(b) b.textContent=msg; }
     function setBadge2(msg){ const b=$('#badge2'); if(b) b.textContent=msg; }
     window.onerror = (m)=>{ setBadge2('JS-fel: '+m); log('JS-fel: '+m); };
 
-    // --- minimal register just to have UI alive ---
-    const KEY='vinyl_records'; function render(){ const list=JSON.parse(localStorage.getItem(KEY)||'[]'); setBadge(`v8.6b • ${list.length} poster`); const tb=$('#registerTable tbody'); tb.innerHTML=''; list.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.artist||''}</td><td>${r.title||''}</td><td>${r.year||''}</td><td>${r.format||''}</td><td class="col-ean">${r.ean||''}</td><td class="right"><button class="btn">—</button></td>`; tb.appendChild(tr); }); }
-    document.addEventListener('DOMContentLoaded', render);
-
-    // --- ZXing check ---
-    function ensureZXing(){
-      if (!window.ZXing || !ZXing.BrowserMultiFormatReader){ setBadge2('ZXing saknas'); log('ZXing-biblioteket kunde inte laddas'); return false; }
-      return true;
+    // Capability check
+    const hasBD = 'BarcodeDetector' in window;
+    let supported = [];
+    if (hasBD && window.BarcodeDetector.getSupportedFormats){
+      BarcodeDetector.getSupportedFormats().then(f=>{ supported=f; log('BarcodeDetector formats: '+f.join(', ')); });
+    } else if (hasBD){
+      log('BarcodeDetector finns men getSupportedFormats saknas');
+    } else {
+      log('BarcodeDetector saknas – Live kräver Chrome/Edge på Android med HTTPS');
     }
 
-    // --- Live scanner (environment only) ---
-    let codeReader=null, lastStream=null, watchdogTimer=null, decodeCount=0, notFoundCount=0;
-    let envDevice=null, torchOn=false;
+    // State
+    let detector=null, lastStream=null, rafId=null, torchOn=false;
+    let decodeCount=0, missCount=0;
 
-    function hintsReader(){
-      try{
-        const hints=new Map();
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E]);
-        hints.set(ZXing.DecodeHintType.TRY_HARDER,true);
-        return new ZXing.BrowserMultiFormatReader(hints);
-      }catch(_){ return new ZXing.BrowserMultiFormatReader(); }
+    function ensureDetector(){
+      if (!hasBD) return null;
+      if (!detector){
+        try{
+          detector = new BarcodeDetector({ formats: ['ean-13','ean-8','upc-a','upc-e'] });
+        }catch(e){
+          log('Kunde inte skapa detector: '+(e.message||e));
+          detector = null;
+        }
+      }
+      return detector;
     }
-    function makeReader(){ if (!codeReader) codeReader=hintsReader(); return codeReader; }
-    function scanStatus(){ const s=$('#scanStatus'); if(s) s.textContent=`r:${decodeCount} • nf:${notFoundCount}`; }
-    function trackAlive(){ try{ const t=lastStream?.getVideoTracks?.()[0]; return !!t && t.readyState==='live' && !t.muted && !t.stopped; }catch(_){ return false; } }
-    function labelScore(label){ label=(label||'').toLowerCase(); let s=0; if (/(back|rear|environment|main)/.test(label)) s+=100; if (/(wide|tele|main|1\.0x)/.test(label)) s+=5; if (/(front|user|selfie|face)/.test(label)) s-=500; return s; }
-    async function pickEnvironmentCamera(){
-      const devices=await navigator.mediaDevices.enumerateDevices();
-      const vids=devices.filter(d=>d.kind==='videoinput');
-      vids.sort((a,b)=> labelScore(b.label)-labelScore(a.label));
-      envDevice = vids.find(d=>/(back|rear|environment|main|tele|wide)/i.test(d.label||'')) || vids[vids.length-1] || vids[0] || null;
-      log('Vald enhet: '+(envDevice?.label||'(okänd)'));
-    }
+
     function supportsTorch(){
-      try{ const track=lastStream?.getVideoTracks?.()[0]; const caps=track?.getCapabilities?.(); return !!(caps && 'torch' in caps); }catch(_){ return false; }
+      try{
+        const track = lastStream?.getVideoTracks?.()[0];
+        const caps = track?.getCapabilities?.();
+        return !!(caps && 'torch' in caps);
+      }catch(_){ return false; }
     }
     async function setTorch(on){
-      try{ const track=lastStream.getVideoTracks()[0]; await track.applyConstraints({ advanced:[{ torch: !!on }] }); torchOn=!!on; updateTorchButton(); }catch(_){}
+      try{
+        const track=lastStream.getVideoTracks()[0];
+        await track.applyConstraints({ advanced:[{ torch: !!on }] });
+        torchOn=!!on; updateTorchBtn();
+      }catch(e){ log('Torch misslyckades: '+(e.message||e)); }
     }
-    function updateTorchButton(){
+    function updateTorchBtn(){
       const btn=$('#btnTorch'); if (!btn) return;
       if (supportsTorch()){ btn.style.display=''; btn.textContent = torchOn ? '💡 Lampa AV' : '💡 Lampa PÅ'; btn.onclick = ()=> setTorch(!torchOn); }
       else btn.style.display='none';
     }
-    function setupZoom(){
-      const v=$('#video'); const track=v?.srcObject?.getVideoTracks?.()[0]; const caps=track?.getCapabilities?.();
-      const wrap=$('#zoomWrap'), slider=$('#zoomSlider'), label=$('#zoomVal');
-      if (caps?.zoom){ wrap.style.display='flex'; slider.min=caps.zoom.min||1; slider.max=caps.zoom.max||1; slider.step=caps.zoom.step||0.1; const s=track.getSettings?.(); if (s?.zoom) slider.value=s.zoom; label.textContent=(Number(slider.value)||1).toFixed(1)+'×'; slider.oninput=async()=>{ const val=Number(slider.value)||1; label.textContent=val.toFixed(1)+'×'; try{ await track.applyConstraints({ advanced:[{ zoom: val }] }); }catch(_){}}; } else { wrap.style.display='none'; }
-    }
-    function facingOf(stream){ try{ const s=stream.getVideoTracks()[0]?.getSettings?.(); return s?.facingMode||''; }catch(_){ return ''; } }
 
-    async function ensureEnvironmentOrCycle(maxTries=4){
-      for (let i=0;i<maxTries;i++){
-        const f = (facingOf(lastStream)||'').toLowerCase();
-        const lbl = lastStream?.getVideoTracks?.()[0]?.label || '';
-        log(`Check facing: ${f||'(okänd)'} | label: ${lbl}`);
-        if (f.includes('environment') || /back|rear|environment|main/i.test(lbl)) return true;
-        await pickEnvironmentCamera();
-        await restartZXing(true);
-      }
-      return false;
+    function scanStatus(){ const s=$('#scanStatus'); if(s) s.textContent=`r:${decodeCount} • nf:${missCount}`; }
+
+    function stopLive(){
+      cancelAnimationFrame(rafId); rafId=null;
+      if (lastStream){ try{ lastStream.getTracks().forEach(t=>t.stop()); }catch(_){ } lastStream=null; }
+      $('#scanOverlay').style.display='none';
+      setBadge2('JS laddat ✅ (v8.7)');
+      log('Live stoppad');
     }
 
     async function startLive(){
-      if (!ensureZXing()) return alert('ZXing-biblioteket kunde inte laddas. Kontrollera nätet/CSP.');
+      if (!hasBD){ alert('Din webbläsare saknar Native BarcodeDetector. Prova “Foto (failsafe)”.'); return; }
+      ensureDetector();
       try{
         $('#scanOverlay').style.display='flex';
-        decodeCount=0; notFoundCount=0; scanStatus(); log('Startar live…');
+        decodeCount=0; missCount=0; scanStatus(); log('Startar live…');
 
-        try{
-          const pre = await navigator.mediaDevices.getUserMedia({ video: { facingMode:{ ideal:'environment' }, width:{ideal:1280}, height:{ideal:720}, aspectRatio:{ideal:16/9} } });
-          $('#video').srcObject=pre; lastStream=pre; log('Preflight OK');
-        }catch(e){ log('Preflight misslyckades: '+e.name); }
-
-        await pickEnvironmentCamera();
-        await startZXing();
-        const ok = await ensureEnvironmentOrCycle(6);
-        log('Environment check: '+(ok?'OK':'MISS'));
-
-      }catch(e){
-        setBadge2('Startfel'); log('Startfel: '+(e?.message||e));
-        if (e && e.name==='NotAllowedError'){ alert('Kameratillstånd behövs. Öppna Sajtinställningar → Kamera → Tillåt.'); }
-      }
-    }
-    window.__startLive = startLive;
-
-    async function stopLive(){
-      $('#scanOverlay').style.display='none';
-      try{ codeReader && codeReader.reset(); }catch(_){}
-      if (lastStream){ try{ lastStream.getTracks().forEach(t=>t.stop()); }catch(_){ } lastStream=null; }
-      clearInterval(watchdogTimer); watchdogTimer=null;
-      setBadge2('JS laddat ✅ (v8.6b)');
-      log('Live stoppad');
-    }
-    $('#btnStopScan').addEventListener('click', stopLive);
-
-    function onDetectedEAN(text){
-      decodeCount++; scanStatus(); log('TRÄFF: '+text);
-      const ean=String(text).replace(/[^0-9X]/g,'');
-      if ($('#ean')) $('#ean').value=ean;
-      stopLive();
-    }
-
-    async function startZXing(){
-      const reader=makeReader();
-      return restartZXing(false);
-      async function restartZXing(isCycle){
-        try{ reader.reset(); }catch(_){}
-        notFoundCount=0; scanStatus();
+        // Environment, 1280x720, 16:9
         const constraints = {
           video: {
-            deviceId: envDevice && envDevice.deviceId ? { exact: envDevice.deviceId } : undefined,
-            facingMode: envDevice ? undefined : { exact: 'environment' },
-            width:{ ideal:1280 }, height:{ ideal:720 }, frameRate:{ ideal:30 }, aspectRatio:{ ideal:16/9 },
-            advanced:[{ focusMode:'continuous' }]
-          }
+            facingMode: { ideal: 'environment' },
+            width:      { ideal: 1280 },
+            height:     { ideal: 720 },
+            aspectRatio:{ ideal: 16/9 },
+            frameRate:  { ideal: 30 },
+            advanced:   [{ focusMode: 'continuous' }]
+          },
+          audio: false
         };
-        try{
-          await reader.decodeFromConstraints(constraints, 'video', (result, err)=>{
-            if (result && result.text){ onDetectedEAN(result.text); }
-            else if (err && !(err instanceof ZXing.NotFoundException)){ setBadge2('ZXing-fel: '+err); log('ZXing-fel: '+err); }
-            else if (err instanceof ZXing.NotFoundException){ notFoundCount++; if (notFoundCount%25===0) scanStatus(); }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const track = stream.getVideoTracks()[0];
+        const s = track.getSettings ? track.getSettings() : {};
+        const label = track.label || 'Kamera';
+        $('#camInfo').textContent = `${label} ${s.width||''}x${s.height||''} ${s.facingMode||''}`;
+        updateTorchBtn();
+
+        const video = $('#video');
+        video.srcObject = stream; lastStream = stream;
+        await video.play();
+
+        // Canvas för detektion
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        function loop(){
+          rafId = requestAnimationFrame(loop);
+          if (video.readyState < 2) return; // inte redo
+          const vw = video.videoWidth, vh = video.videoHeight;
+          if (!vw || !vh) return;
+          if (canvas.width !== vw || canvas.height !== vh){
+            canvas.width = vw; canvas.height = vh;
+          }
+          // rita aktuell frame
+          ctx.drawImage(video, 0, 0, vw, vh);
+          detector.detect(canvas).then(codes=>{
+            if (codes && codes.length){
+              // välj första EAN/UPC
+              const c = codes.find(x=>x.rawValue) || codes[0];
+              if (c && c.rawValue){
+                decodeCount++; scanStatus();
+                const ean = String(c.rawValue).replace(/[^0-9X]/g,'');
+                if ($('#ean')) $('#ean').value = ean;
+                stopLive();
+              }
+            } else {
+              missCount++; if (missCount % 25 === 0) scanStatus();
+            }
+          }).catch(err=>{
+            log('Detect-fel: '+(err.message||err));
           });
-          setTimeout(()=>{
-            const v=$('#video'); lastStream=v?.srcObject||null;
-            const t=lastStream?.getVideoTracks?.()[0]; const st=t?.getSettings?.()||{};
-            $('#camInfo').textContent=(t?.label||'Environment')+' '+(st.width||'')+'x'+(st.height||'');
-            setupZoom(); updateTorchButton();
-            if (t){ t.onended = ()=>{ setBadge2('Ström slutade – startar om'); restartZXing(false); }; }
-            log('ZXing igång på '+$('#camInfo').textContent);
-          }, 350);
-        }catch(e){
-          setBadge2('Kunde inte starta normalkamera'); log('Kunde inte starta normalkamera: '+(e?.message||e));
         }
+        loop();
+
+      }catch(e){
+        log('Startfel: '+(e.name||'')+' '+(e.message||e));
+        if (e.name === 'NotAllowedError'){
+          alert('Kameratillstånd behövs. Öppna Sajtinställningar → Kamera → Tillåt.');
+        }else if (e.name === 'NotFoundError'){
+          alert('Ingen kamera hittades. Kontrollera att ingen annan app använder kameran.');
+        }else if (location.protocol !== 'https:'){
+          alert('Live-skanning kräver HTTPS. Använd https://…');
+        }else{
+          alert('Kunde inte starta kameran.');
+        }
+        stopLive();
       }
     }
 
-    // --- Foto (failsafe): capture="environment" + ZXing decode ---
+    // Photo fallback (native BD)
     const fileInput = $('#fileInput');
     async function startPhoto(){
-      if (!ensureZXing()) return alert('ZXing-biblioteket kunde inte laddas.');
       try{
-        log('Öppnar kamera (foto)…');
         fileInput.value='';
         fileInput.click();
       }catch(e){
-        log('Foto-startfel: '+(e?.message||e));
+        log('Foto-startfel: '+(e.message||e));
       }
     }
-    window.__startPhoto = startPhoto;
-
     fileInput.addEventListener('change', async (e)=>{
-      const file=e.target.files && e.target.files[0];
+      const file = e.target.files && e.target.files[0];
       if (!file) return;
       log('Foto valt: '+file.type+' '+file.size+' bytes');
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = async ()=>{
         try{
-          const reader=makeReader();
-          const code = await reader.decodeFromImageElement(img);
-          if (code && code.text){ onDetectedEAN(code.text); }
-          else { log('Ingen kod hittad i foto'); alert('Ingen streckkod hittades i fotot. Försök igen med bättre fokus/ljus.'); }
+          ensureDetector();
+          if (!detector){ alert('Detektorn saknas i den här webbläsaren.'); return; }
+          const off = document.createElement('canvas');
+          off.width = img.naturalWidth; off.height = img.naturalHeight;
+          const ictx = off.getContext('2d', { willReadFrequently: true });
+          ictx.drawImage(img, 0, 0);
+          const codes = await detector.detect(off);
+          if (codes && codes.length){
+            const c = codes.find(x=>x.rawValue) || codes[0];
+            const ean = String(c.rawValue).replace(/[^0-9X]/g,'');
+            if ($('#ean')) $('#ean').value = ean;
+            log('TRÄFF i foto: '+ean);
+          } else {
+            alert('Ingen streckkod hittades i fotot. Försök igen med bättre fokus/ljus.');
+          }
         }catch(err){
-          log('Dekodfel i foto: '+(err?.message||err));
+          log('Dekodfel i foto: '+(err.message||err));
           alert('Kunde inte läsa koden i fotot.');
-        }finally{ URL.revokeObjectURL(url); }
+        }finally{
+          URL.revokeObjectURL(url);
+        }
       };
       img.onerror = ()=>{ URL.revokeObjectURL(url); log('Kunde inte läsa bilden'); };
       img.src = url;
     });
 
-    // init
+    // Bind UI
     document.addEventListener('DOMContentLoaded', ()=>{
-      setBadge2('JS laddat ✅ (v8.6b)');
-      log('Sidan klar');
+      $('#btnScanLive').addEventListener('click', startLive);
+      $('#btnStopScan').addEventListener('click', stopLive);
+      $('#btnScanPhoto').addEventListener('click', startPhoto);
+      setBadge2('JS laddat ✅ (v8.7)');
+      log('JS laddat. Native BarcodeDetector: '+(hasBD?'Ja':'Nej') + (location.protocol!=='https:'?' • OBS! HTTPS krävs för live':'') );
     });
   })();
   </script>
