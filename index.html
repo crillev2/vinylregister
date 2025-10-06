@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Single File + Skanner</title>
+  <title>Vinylregister – Single File + Skanner v2</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; }
     *{ box-sizing:border-box; }
@@ -34,13 +34,16 @@
     .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:center; justify-content:center; z-index:9999; }
     .scan-card{ background:#fff; border-radius:12px; padding:12px; width:min(720px, 94vw); }
     .scan-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+    .scan-video-wrap{ position:relative; }
     .scan-video{ width:100%; border-radius:8px; background:#000; aspect-ratio:16/9; }
+    .guides{ position:absolute; inset:0; pointer-events:none; display:grid; place-items:center; }
+    .guide-box{ width:70%; height:48%; border:2px solid rgba(0,255,120,.9); border-radius:12px; box-shadow: 0 0 0 9999px rgba(0,0,0,.25) inset; }
     .scan-row{ display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
     .hint{ font-size:12px; color:#666; }
   </style>
 </head>
 <body>
-  <h1>Vinylregister (single-file + skanner)</h1>
+  <h1>Vinylregister (single-file + skanner v2)</h1>
 
   <div class="wrap">
     <h2>Inmatning</h2>
@@ -105,12 +108,16 @@
         <strong>Skanna streckkod</strong>
         <div class="row">
           <select class="btn" id="cameraSelect"></select>
+          <button class="btn" id="btnTorch" style="display:none;">💡 Lampa</button>
           <button class="btn danger" id="btnStopScan">Stäng</button>
         </div>
       </div>
-      <video id="video" class="scan-video" autoplay muted playsinline></video>
+      <div class="scan-video-wrap">
+        <video id="video" class="scan-video" autoplay muted playsinline></video>
+        <div class="guides"><div class="guide-box"></div></div>
+      </div>
       <div class="scan-row">
-        <span class="hint">Tip: Håll koden i fokus och bra ljus. Skannern stannar automatiskt vid träff.</span>
+        <span class="hint">Tips: Fyll den gröna rutan med streckkoden, bra ljus, håll still. Skannern stoppar när kod hittas.</span>
       </div>
     </div>
   </div>
@@ -240,21 +247,44 @@
       store.save(list); render(); clearForm();
     }
 
-    // --- Scanner ---
+    // --- Scanner v2 ---
     let codeReader = null;
     let currentDeviceId = null;
+    let lastStream = null;
+    let torchOn = false;
+
+    const HINTS = (function(){
+      try{
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.EAN_13,
+          ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.UPC_A,
+          ZXing.BarcodeFormat.UPC_E
+        ]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        return hints;
+      }catch(_){ return undefined; }
+    })();
+
+    function makeReader(){
+      if (!codeReader){
+        try{ codeReader = new ZXing.BrowserMultiFormatReader(HINTS); }
+        catch(_){ codeReader = new ZXing.BrowserMultiFormatReader(); }
+      }
+      return codeReader;
+    }
+
     async function startScanner(){
       const overlay = $('#scanOverlay');
       overlay.style.display = 'flex';
       setBadge2('Startar kamera…');
 
-      if (!codeReader){
-        codeReader = new ZXing.BrowserMultiFormatReader();
-      }
-
-      // Lista kameror
+      const reader = makeReader();
       const select = $('#cameraSelect');
       select.innerHTML='';
+
+      // Lista kameror
       try{
         const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
         devices.forEach((d,i)=>{
@@ -265,37 +295,83 @@
         if (devices.length){ currentDeviceId = devices[0].deviceId; select.value = currentDeviceId; }
       }catch(e){ console.warn(e); }
 
-      // Lyssna på kamerabyte
       select.onchange = ()=>{
         currentDeviceId = select.value || null;
         restartDecode();
       };
 
-      function onResult(result){
-        if (!result || !result.text) return;
-        const ean = String(result.text).replace(/[^0-9X]/g,'');
+      async function restartDecode(){
+        try{ reader.reset(); }catch(_){}
+        torchOn = false;
+        const constraints = {
+          video: {
+            deviceId: currentDeviceId ? { exact: currentDeviceId } : undefined,
+            facingMode: currentDeviceId ? undefined : { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            aspectRatio: { ideal: 1.777 },
+            frameRate: { ideal: 30 }
+          }
+        };
+        try{
+          await reader.decodeFromConstraints(constraints, 'video', (result, err) => {
+            if (result && result.text){
+              onResult(result.text);
+            } else if (err && !(err instanceof ZXing.NotFoundException)){
+              console.warn('Scan error:', err);
+            }
+          });
+          // vänta lite och plocka strömmen
+          await new Promise(r=>setTimeout(r, 300));
+          const video = $('#video');
+          lastStream = video && video.srcObject ? video.srcObject : null;
+          updateTorchButton();
+        }catch(e){
+          console.error(e);
+          setBadge2('Kunde inte starta kamera');
+        }
+      }
+
+      function onResult(text){
+        const ean = String(text).replace(/[^0-9X]/g,'');
         const eanInput = $('#ean');
         if (eanInput){ eanInput.value = ean; }
         beep();
         stopScanner();
       }
 
-      function onError(err){ /* ignorera kontinuerliga no-code-ramar */ }
+      function supportsTorch(){
+        try{
+          if (!lastStream) return false;
+          const track = lastStream.getVideoTracks && lastStream.getVideoTracks()[0];
+          if (!track) return false;
+          const caps = track.getCapabilities && track.getCapabilities();
+          return !!(caps && 'torch' in caps);
+        }catch(_){ return false; }
+      }
 
-      function restartDecode(){
+      async function setTorch(on){
         try{
-          codeReader.reset();
-        }catch(_){}
-        try{
-          codeReader.decodeFromVideoDevice(currentDeviceId, 'video', (result, err) => {
-            if (result) onResult(result);
-            else if (err && !(err instanceof ZXing.NotFoundException)) onError(err);
-          });
-        }catch(e){
-          console.error(e);
-          setBadge2('Kunde inte starta kamera');
+          if (!lastStream) return;
+          const track = lastStream.getVideoTracks()[0];
+          await track.applyConstraints({ advanced: [{ torch: !!on }] });
+          torchOn = !!on;
+          updateTorchButton();
+        }catch(e){ console.warn('Torch not supported:', e); }
+      }
+
+      function updateTorchButton(){
+        const btn = $('#btnTorch');
+        if (!btn) return;
+        if (supportsTorch()){
+          btn.style.display = '';
+          btn.textContent = torchOn ? '💡 Lampa AV' : '💡 Lampa PÅ';
+        } else {
+          btn.style.display = 'none';
         }
       }
+
+      $('#btnTorch').onclick = ()=> setTorch(!torchOn);
 
       restartDecode();
     }
@@ -304,6 +380,10 @@
       const overlay = $('#scanOverlay');
       overlay.style.display = 'none';
       try{ codeReader && codeReader.reset(); }catch(_){}
+      if (lastStream){
+        try{ lastStream.getTracks().forEach(t=>t.stop()); }catch(_){}
+        lastStream = null;
+      }
       setBadge2('JS laddat ✅');
     }
 
