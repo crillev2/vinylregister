@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – v9 (ENV, en variant)</title>
+  <title>Vinylregister – v9.1 (EN variant, robust)</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; }
     *{ box-sizing:border-box; }
@@ -19,10 +19,8 @@
     .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     .btn{ border:1px solid var(--line); border-radius:10px; padding:8px 12px; background:#fafafa; cursor:pointer; }
     .btn:hover{ background:#f0f0f0; }
-    .btn.primary{ border-color:#cce2ff; background:#eef6ff; }
     .note{ font-size:12px; color:var(--muted); }
     .badge{ position:fixed; right:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; white-space:nowrap; }
-    .toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:56px; background:#222; color:#fff; font-size:12px; padding:8px 12px; border-radius:8px; z-index:99999; opacity:.95; }
     .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:center; justify-content:center; z-index:9999; }
     .scan-card{ background:#fff; border-radius:12px; padding:12px; width:min(860px, 96vw); }
     .scan-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
@@ -31,12 +29,12 @@
   </style>
 </head>
 <body>
-  <h1>Vinylregister – v9 (Environment, enda varianten)</h1>
+  <h1>Vinylregister – v9.1 (EN variant)</h1>
 
   <div class="wrap">
     <div class="wrap-head">
       <h2>Inmatning</h2>
-      <button class="btn primary" id="btnScan">📷 Skanna streckkod</button>
+      <button class="btn" id="btnScan">📷 Skanna streckkod</button>
     </div>
     <div class="grid">
       <label class="field"><span>EAN</span><input id="ean" class="manual" type="text" inputmode="numeric" pattern="[0-9]*"></label>
@@ -45,7 +43,7 @@
       <label class="field"><span>År</span><input id="year" class="manual" type="number" step="1"></label>
       <label class="field"><span>Format</span><input id="format" class="manual" type="text"></label>
     </div>
-    <p class="note">Tips: håll telefonen i <b>landskapsläge</b> (bred) när du skannar – EAN är långsmal.</p>
+    <p class="note">Tips: håll telefonen i <b>landskapsläge</b> när du skannar (EAN är långsmal).</p>
   </div>
 
   <div id="badge" class="badge">Init…</div>
@@ -65,100 +63,131 @@
     </div>
   </div>
 
-  <!-- ZXing -->
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0"></script>
-
   <script>
   (function(){
     "use strict";
     const $=(s,r=document)=>r.querySelector(s);
-    const toast=(m)=>{ const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>t.remove(), 1600); };
     const setBadge=(m)=>{ const b=$('#badge'); if(b) b.textContent=m; };
+    const toast=(m)=>{ const t=document.createElement('div'); t.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:56px;background:#222;color:#fff;font-size:12px;padding:8px 12px;border-radius:8px;z-index:99999;opacity:.95'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>t.remove(), 1600); };
 
-    let reader=null, currentDeviceId=null, lastStream=null, hits=0, misses=0;
-
-    function hintsReader(){
-      try{
-        const hints=new Map();
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E]);
-        hints.set(ZXing.DecodeHintType.TRY_HARDER,true);
-        return new ZXing.BrowserMultiFormatReader(hints);
-      }catch(_){ return new ZXing.BrowserMultiFormatReader(); }
+    // Loader: try 3 CDNs; then fallback to native BarcodeDetector (if available)
+    function loadZXing(){
+      return new Promise(async (resolve,reject)=>{
+        const urls=[
+          'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0',
+          'https://unpkg.com/@zxing/library@0.20.0',
+          'https://cdnjs.cloudflare.com/ajax/libs/zxing/0.20.0/zxing.min.js' // ev. finns inte – ignoreras om 404
+        ];
+        for (const url of urls){
+          try{
+            await new Promise((res,rej)=>{
+              const s=document.createElement('script');
+              s.src=url; s.async=true; s.onload=()=>res(); s.onerror=()=>rej(new Error('load fail '+url));
+              document.head.appendChild(s);
+            });
+            if (window.ZXing && ZXing.BrowserMultiFormatReader){ setBadge('Skannermotor: ZXing ✅'); return resolve('zxing'); }
+          }catch(e){ /* try next */ }
+        }
+        if ('BarcodeDetector' in window){
+          setBadge('Skannermotor: Native BD ✅'); return resolve('native');
+        }
+        reject(new Error('Ingen skannermotor tillgänglig'));
+      });
     }
-    function status(){ const s=$('#scanStatus'); if(s) s.textContent=`r:${hits} • nf:${misses}`; }
 
+    // ZXing path
+    let reader=null, lastStream=null, hits=0, misses=0, currentDeviceId=null;
+    function status(){ const s=$('#scanStatus'); if(s) s.textContent=`r:${hits} • nf:${misses}`; }
     async function pickEnvironmentId(){
       const devices=await navigator.mediaDevices.enumerateDevices();
       const vids=devices.filter(d=>d.kind==='videoinput');
-      // välj den som tydligt är back/rear/environment/main, annars sista enheten
       const best = vids.find(d=>/(back|rear|environment|main|tele|wide)/i.test(d.label||'')) || vids[vids.length-1] || vids[0] || null;
       currentDeviceId = best && best.deviceId || null;
       return currentDeviceId;
     }
-
-    function stop(){
+    function stopCommon(){
       try{ reader && reader.reset(); }catch(_){}
       if (lastStream){ try{ lastStream.getTracks().forEach(t=>t.stop()); }catch(_){ } lastStream=null; }
       $('#scanOverlay').style.display='none';
       setBadge('Klar');
     }
+    async function startZXing(){
+      $('#scanOverlay').style.display='flex'; hits=0; misses=0; status();
+      // preflight -> få labels
+      try{ await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'} } }); }catch(_){}
+      await pickEnvironmentId();
+      reader = new ZXing.BrowserMultiFormatReader();
+      await reader.decodeFromVideoDevice(currentDeviceId, 'video', (result, err, controls)=>{
+        const v=$('#video'); if (v && v.srcObject) lastStream=v.srcObject;
+        try{
+          const t=lastStream?.getVideoTracks?.()[0]; const st=t?.getSettings?.()||{};
+          $('#camInfo').textContent=(t?.label||'Kamera')+' '+(st.width||'')+'x'+(st.height||'')+' '+(st.facingMode||'');
+        }catch(_){}
+        if (result && result.text){
+          hits++; status();
+          const ean=String(result.text).replace(/[^0-9X]/g,'');
+          const el=$('#ean'); if (el) el.value=ean;
+          toast('EAN: '+ean);
+          controls && controls.stop();
+          stopCommon();
+        }else if (err){
+          if (err instanceof ZXing.NotFoundException){ misses++; if (misses%25===0) status(); }
+        }
+      });
+      setBadge('Skanning igång');
+    }
+
+    // Native BD path
+    let detector=null, rafId=null;
+    function stopNative(){
+      cancelAnimationFrame(rafId); rafId=null;
+      if (lastStream){ try{ lastStream.getTracks().forEach(t=>t.stop()); }catch(_){ } lastStream=null; }
+      $('#scanOverlay').style.display='none';
+      setBadge('Klar');
+    }
+    async function startNative(){
+      $('#scanOverlay').style.display='flex'; hits=0; misses=0; status();
+      detector = new BarcodeDetector({ formats:['ean-13','ean-8','upc-a','upc-e'] });
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720}, aspectRatio:{ideal:16/9} }, audio:false });
+      const v=$('#video'); v.srcObject=stream; lastStream=stream; await v.play();
+      const c=document.createElement('canvas'); const ctx=c.getContext('2d',{willReadFrequently:true});
+      function loop(){
+        rafId=requestAnimationFrame(loop);
+        if (v.readyState<2) return;
+        const vw=v.videoWidth, vh=v.videoHeight; if(!vw||!vh) return;
+        if (c.width!==vw||c.height!==vh){ c.width=vw; c.height=vh; }
+        ctx.drawImage(v,0,0,vw,vh);
+        detector.detect(c).then(list=>{
+          if (list && list.length){
+            const code = list.find(x=>x.rawValue)||list[0];
+            if (code && code.rawValue){
+              hits++; status();
+              const ean=String(code.rawValue).replace(/[^0-9X]/g,'');
+              const el=$('#ean'); if (el) el.value=ean;
+              toast('EAN: '+ean);
+              stopNative();
+            }
+          }else{ misses++; if (misses%25===0) status(); }
+        }).catch(_=>{});
+      }
+      loop();
+      setBadge('Skanning igång');
+    }
 
     async function start(){
-      if (!window.ZXing || !ZXing.BrowserMultiFormatReader){
-        alert('Kunde inte ladda skannermotorn. Kontrollera internet (CDN) och HTTPS.');
-        return;
-      }
       try{
-        $('#scanOverlay').style.display='flex';
-        hits=0; misses=0; status();
-        reader = hintsReader();
-
-        // Preflight – få labels för att hitta "environment"
-        try{
-          await navigator.mediaDevices.getUserMedia({ video: { facingMode:{ ideal:'environment' }, width:{ideal:1280}, height:{ideal:720}, aspectRatio:{ideal:16/9} } });
-        }catch(_){ /* ignore */}
-
-        const id = await pickEnvironmentId();
-
-        await reader.decodeFromVideoDevice(id, 'video', (result, err, controls)=>{
-          const v=$('#video');
-          if (v && v.srcObject) { lastStream=v.srcObject; }
-          try{
-            const t=lastStream?.getVideoTracks?.()[0];
-            const st=t?.getSettings?.()||{};
-            $('#camInfo').textContent = (t?.label||'Kamera')+' '+(st.width||'')+'x'+(st.height||'')+' '+(st.facingMode||'');
-          }catch(_){}
-          if (result && result.text){
-            hits++; status();
-            const ean = String(result.text).replace(/[^0-9X]/g,'');
-            const el=$('#ean'); if (el) el.value=ean;
-            toast('EAN: '+ean);
-            stop();
-            controls && controls.stop();
-          } else if (err){
-            if (err instanceof ZXing.NotFoundException){
-              misses++; if (misses%25===0) status();
-            } else {
-              // andra fel – visa tyst i badge och fortsätt
-              setBadge('Fel: '+(err.message||err));
-            }
-          }
-        });
-
-        setBadge('Skanning igång');
-
+        const engine = await loadZXing();
+        if (engine==='zxing') await startZXing();
+        else await startNative();
       }catch(e){
-        setBadge('Startfel');
-        const protoOk = location.protocol==='https:';
-        alert((protoOk?'':'OBS: Kräver HTTPS. ') + 'Kunde inte starta kameran: '+(e.name||'')+' '+(e.message||e));
-        stop();
+        alert('Kunde inte starta skannern. Kräver HTTPS och kameratillstånd. Fel: '+(e.message||e));
       }
     }
 
     document.addEventListener('DOMContentLoaded', ()=>{
       $('#btnScan').addEventListener('click', start);
-      $('#btnStop').addEventListener('click', stop);
-      setBadge('JS laddat ✅ (v9)');
+      $('#btnStop').addEventListener('click', ()=>{ stopCommon(); stopNative(); });
+      setBadge('JS laddat ✅ (v9.1)');
     });
   })();
   </script>
