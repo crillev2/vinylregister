@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vinylregister – Minimal (extern JS)</title>
+  <title>Vinylregister – Minimal (extern JS v3)</title>
   <style>
     :root { --fg:#111; --muted:#555; --line:#e5e5e5; --bg:#ffffff; --chip:#f6f6f6; }
     *{ box-sizing:border-box; }
@@ -29,12 +29,13 @@
     .col-ean{ display:none !important; } /* dölj EAN-kolumnen */
     #quickSearch{ width:100%; margin:8px 0 12px; }
     .badge{ position:fixed; right:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; }
-    .note{ font-size:12px; color:#666; }
+    .note{ font-size:12px; color:var(--muted); }
+    .js-ok{ position:fixed; left:12px; bottom:12px; background:#F0FFF5; border:1px solid #9ad27e; padding:4px 8px; border-radius:6px; font-size:12px; z-index:99999; }
     @media (max-width: 900px){ .grid{ grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
-  <h1>Vinylregister (minimal, extern JS)</h1>
+  <h1>Vinylregister (minimal, extern JS v3)</h1>
 
   <div class="wrap">
     <h2>Inmatning</h2>
@@ -62,9 +63,9 @@
     <input id="quickSearch" class="manual" type="search" placeholder="Sök artist/titel/EAN…">
     <div class="row" style="gap:8px; margin:6px 0;">
       <button class="btn" id="btnAddTest">➕ Lägg till testpost</button>
+      <button class="btn" id="btnSaveTop">Spara</button>
       <button class="btn" id="btnExport">⬇️ Exportera JSON</button>
       <button class="btn" id="btnImport">⬆️ Importera JSON</button>
-      <button class="btn" id="btnSaveTop">Spara</button>
       <button class="btn danger" id="btnReset">🧹 Nollställ register</button>
       <span id="keysInfo" class="note" style="margin-left:auto;"></span>
     </div>
@@ -91,7 +92,6 @@
 
   <div id="badge" class="badge">Init…</div>
 
-  <!-- Ladda extern JS (undviker att rå JS syns som text om en tagg råkar gå sönder) -->
-  <script defer src="./app_min.js?v=1"></script>
+  <script defer src="./app_min_v3.js?v=3"></script>
 </body>
 </html>
